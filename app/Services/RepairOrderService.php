@@ -4,19 +4,23 @@ namespace App\Services;
 
 use App\Enums\CustomerApprovalStatus;
 use App\Enums\PaymentStatus;
-use App\Enums\RepairMode;
 use App\Enums\RepairOrderStatus;
+use App\Enums\RepairExternalPartStatus;
+use App\Enums\TransactionType;
 use App\Enums\RepairSubStatus;
 use App\Enums\StockMovementType;
 use App\Models\Customer;
+use App\Models\FinancialAccount;
 use App\Models\FinancialTransaction;
 use App\Models\Product;
 use App\Models\ProductStock;
+use App\Models\RepairExternalPart;
 use App\Models\RepairOrder;
 use App\Models\RepairPayment;
 use App\Models\RepairPart;
 use App\Models\RepairStatusHistory;
 use App\Models\StockMovement;
+use App\Models\Supplier;
 use App\Models\Warehouse;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
@@ -121,17 +125,18 @@ class RepairOrderService
     public function create(array $data): RepairOrder
     {
         return DB::transaction(function () use ($data) {
-            $initialTotal = max(
-                (float) ($data['estimated_cost'] ?? 0),
-                (float) ($data['inspection_fee'] ?? 0),
-                (float) ($data['payment_amount'] ?? 0)
-            );
-
-            // معالجة العميل
             $customer = $this->handleCustomer($data);
+
+            $receivedAt = Carbon::parse($data['received_at'] ?? now());
+            if ($receivedAt->isFuture()) {
+                throw new \RuntimeException('وقت استلام الجهاز لا يمكن أن يكون في المستقبل.');
+            }
+
+            $agreedPrice = round((float) $data['agreed_price'], 2);
 
             $order = RepairOrder::create([
                 'order_number' => RepairOrder::generateNumber(),
+                'repair_mode' => 'normal',
                 'customer_id' => $customer?->id,
                 'customer_name' => $data['customer_name'] ?? ($customer?->name ?? ''),
                 'customer_phone' => $data['customer_phone'] ?? ($customer?->phone ?? ''),
@@ -144,449 +149,64 @@ class RepairOrderService
                 'received_accessories' => $data['received_accessories'] ?? null,
                 'lock_code' => $data['lock_code'] ?? null,
                 'technician_name' => $data['technician_name'] ?? null,
-                'status' => RepairOrderStatus::RECEIVED,
-                'sub_status' => RepairSubStatus::WAITING_INSPECTION,
-                'customer_approval_status' => CustomerApprovalStatus::NOT_REQUIRED,
-                'estimated_cost' => $data['estimated_cost'] ?? null,
-                'inspection_fee' => $data['inspection_fee'] ?? 0,
-                'total_amount' => $initialTotal,
+                'status' => RepairOrderStatus::IN_PROGRESS,
+                'sub_status' => RepairSubStatus::NONE,
+                'inspection_result' => $data['inspection_result'],
+                'fault_cause' => $data['fault_cause'] ?? null,
+                'repair_action' => $data['repair_action'],
+                'customer_approval_status' => CustomerApprovalStatus::APPROVED,
+                'estimated_cost' => $agreedPrice,
+                'agreed_price' => $agreedPrice,
+                'inspection_fee' => 0,
+                'labor_cost' => 0,
+                'parts_cost' => 0,
+                'total_amount' => $agreedPrice,
                 'paid_amount' => 0,
-                'remaining_amount' => $initialTotal,
-                'payment_status' => PaymentStatus::UNPAID->value,
-                'received_at' => $data['received_at'] ?? now(),
+                'remaining_amount' => $agreedPrice,
+                'payment_status' => $agreedPrice <= 0
+                    ? PaymentStatus::PAID->value
+                    : PaymentStatus::UNPAID->value,
+                'received_at' => $receivedAt,
                 'due_date' => $data['due_date'] ?? null,
                 'expected_delivery_date' => $data['expected_delivery_date'] ?? null,
                 'customer_notes' => $data['customer_notes'] ?? null,
                 'internal_notes' => $data['internal_notes'] ?? null,
             ]);
 
-            // تسجيل الدفعة الأولى
-            if (isset($data['payment_amount']) && $data['payment_amount'] > 0) {
-                $this->addPayment($order, [
-                    'amount' => $data['payment_amount'],
-                    'payment_method' => $data['payment_method'] ?? 'cash',
-                    'financial_account_id' => $data['financial_account_id'] ?? null,
-                    'bank_or_app_name' => $data['bank_or_app_name'] ?? null,
-                    'transaction_reference' => $data['transaction_reference'] ?? null,
-                    'paid_at' => now(),
-                ]);
-            }
-
-            // تسجيل الحالة الأولية
             RepairStatusHistory::create([
                 'repair_order_id' => $order->id,
-                'to_status' => RepairOrderStatus::RECEIVED->value,
-                'notes' => 'تم استلام الجهاز',
+                'from_status' => null,
+                'to_status' => RepairOrderStatus::IN_PROGRESS->value,
+                'notes' => 'تم استلام الجهاز وفحصه وموافقة العميل على تكلفة الصيانة.',
             ]);
-            $this->invalidateDashboardCache();
-            // إرفاق الصور (ستتم في الـ Controller)
 
-            return $order->fresh()->load(['customer', 'attachments', 'parts', 'payments', 'statusHistories']);
-        });
-    }
-
-    /**
-     * إنشاء صيانة سريعة من شاشة واحدة.
-     *
-     * العملية كاملة داخل Transaction واحدة:
-     * Order + Parts + Stock + Payment + Ready/Delivered.
-     */
-    public function createQuick(
-        array $data
-    ): RepairOrder {
-        return DB::transaction(
-            function () use (
-                $data
-            ) {
-                $customer =
-                    $this->handleCustomer(
-                        $data
-                    );
-
-                $receivedAt =
-                    Carbon::parse(
-                        $data['received_at']
-                        ?? now()
-                    );
-
-                if (
-                    $receivedAt->isFuture()
-                ) {
-                    throw new \RuntimeException(
-                        'وقت تسجيل الصيانة لا يمكن أن يكون في المستقبل.'
-                    );
-                }
-
-                $serviceTotal =
-                    round(
-                        (float) (
-                            $data[
-                                'inspection_fee'
-                            ] ?? 0
-                        )
-                        + (float) (
-                            $data[
-                                'labor_cost'
-                            ] ?? 0
-                        ),
-                        2
-                    );
-
-                $order =
-                    RepairOrder::create([
-                        'order_number' =>
-                            RepairOrder
-                                ::generateNumber(),
-
-                        'repair_mode' =>
-                            RepairMode
-                                ::QUICK,
-
-                        'customer_id' =>
-                            $customer?->id,
-
-                        'customer_name' =>
-                            $data[
-                                'customer_name'
-                            ]
-                            ?? (
-                                $customer?->name
-                                ?? ''
-                            ),
-
-                        'customer_phone' =>
-                            $data[
-                                'customer_phone'
-                            ]
-                            ?? (
-                                $customer?->phone
-                                ?? ''
-                            ),
-
-                        'device_type' =>
-                            $data[
-                                'device_type'
-                            ],
-
-                        'brand' =>
-                            $data[
-                                'brand'
-                            ],
-
-                        'model' =>
-                            $data[
-                                'model'
-                            ],
-
-                        'color' =>
-                            $data[
-                                'color'
-                            ] ?? null,
-
-                        'problem_description' =>
-                            $data[
-                                'problem_description'
-                            ],
-
-                        'device_condition' =>
-                            $data[
-                                'device_condition'
-                            ] ?? null,
-
-                        'received_accessories' =>
-                            null,
-
-                        'lock_code' =>
-                            null,
-
-                        'technician_name' =>
-                            $data[
-                                'technician_name'
-                            ] ?? null,
-
-                        /*
-                         * السريع يدخل مباشرة قيد التنفيذ؛
-                         * التشخيص معروف في نفس اللحظة.
-                         */
-                        'status' =>
-                            RepairOrderStatus
-                                ::IN_PROGRESS,
-
-                        'sub_status' =>
-                            RepairSubStatus
-                                ::NONE,
-
-                        'inspection_result' =>
-                            $data[
-                                'inspection_result'
-                            ],
-
-                        'fault_cause' =>
-                            $data[
-                                'fault_cause'
-                            ] ?? null,
-
-                        'repair_action' =>
-                            $data[
-                                'repair_action'
-                            ],
-
-                        'customer_approval_status' =>
-                            CustomerApprovalStatus
-                                ::NOT_REQUIRED,
-
-                        'estimated_cost' =>
-                            $serviceTotal,
-
-                        'inspection_fee' =>
-                            (float) (
-                                $data[
-                                    'inspection_fee'
-                                ] ?? 0
-                            ),
-
-                        'labor_cost' =>
-                            (float) (
-                                $data[
-                                    'labor_cost'
-                                ] ?? 0
-                            ),
-
-                        'parts_cost' =>
-                            0,
-
-                        'total_amount' =>
-                            $serviceTotal,
-
-                        'paid_amount' =>
-                            0,
-
-                        'remaining_amount' =>
-                            $serviceTotal,
-
-                        'payment_status' =>
-                            $serviceTotal <= 0
-                                ? PaymentStatus
-                                    ::PAID
-                                    ->value
-                                : PaymentStatus
-                                    ::UNPAID
-                                    ->value,
-
-                        'received_at' =>
-                            $receivedAt,
-
-                        'due_date' =>
-                            null,
-
-                        'expected_delivery_date' =>
-                            null,
-
-                        'customer_notes' =>
-                            $data[
-                                'customer_notes'
-                            ] ?? null,
-
-                        'internal_notes' =>
-                            $data[
-                                'internal_notes'
-                            ] ?? null,
-                    ]);
-
-                RepairStatusHistory::create([
-                    'repair_order_id' =>
-                        $order->id,
-
-                    'from_status' =>
-                        null,
-
-                    'to_status' =>
-                        RepairOrderStatus
-                            ::IN_PROGRESS
-                            ->value,
-
-                    'notes' =>
-                        'تم تسجيل صيانة سريعة وبدء التنفيذ مباشرة.',
-                ]);
-
-                /*
-                 * إضافة قطع الغيار كمسودات أولاً.
-                 * commitParts يعيد فحص المخزون تحت Lock.
-                 */
-                foreach (
-                    $data['parts']
-                    ?? []
-                    as $partData
-                ) {
-                    $this->addPart(
-                        $order,
-                        [
-                            'product_id' =>
-                                (int) $partData[
-                                    'product_id'
-                                ],
-
-                            'quantity' =>
-                                (int) $partData[
-                                    'quantity'
-                                ],
-
-                            'unit_price' =>
-                                (float) $partData[
-                                    'unit_price'
-                                ],
-                        ]
-                    );
-                }
-
-                if (
-                    $order
-                        ->parts()
-                        ->exists()
-                ) {
-                    $order =
-                        $this->commitParts(
-                            $order
-                        );
-                } else {
-                    $this->recalculateCosts(
-                        $order
-                    );
-
-                    $order =
-                        $order->fresh();
-                }
-
-                /*
-                 * الصيانة السريعة تعتبر منجزة فوراً،
-                 * ثم نحدد هل الجهاز جاهز أم تم تسليمه.
-                 */
-                $order =
-                    $this->markAsReady(
-                        $order,
-                        [
-                            'inspection_result' =>
-                                $data[
-                                    'inspection_result'
-                                ],
-
-                            'repair_action' =>
-                                $data[
-                                    'repair_action'
-                                ],
-
-                            'labor_cost' =>
-                                (float) (
-                                    $data[
-                                        'labor_cost'
-                                    ] ?? 0
-                                ),
-
-                            'internal_notes' =>
-                                $data[
-                                    'internal_notes'
-                                ] ?? null,
-                        ]
-                    );
-
-                /*
-                 * تسجيل الدفعة بعد تثبيت القيمة النهائية
-                 * حتى لا يقبل مبلغاً أكبر من الإجمالي.
-                 */
-                $paymentAmount =
-                    round(
-                        (float) (
-                            $data[
-                                'payment_amount'
-                            ] ?? 0
-                        ),
-                        2
-                    );
-
-                if (
-                    $paymentAmount > 0
-                ) {
-                    $this->addPayment(
-                        $order,
-                        [
-                            'amount' =>
-                                $paymentAmount,
-
-                            'payment_method' =>
-                                $data[
-                                    'payment_method'
-                                ],
-
-                            'financial_account_id' =>
-                                (int) $data[
-                                    'financial_account_id'
-                                ],
-
-                            'bank_or_app_name' =>
-                                $data[
-                                    'bank_or_app_name'
-                                ] ?? null,
-
-                            'transaction_reference' =>
-                                $data[
-                                    'transaction_reference'
-                                ] ?? null,
-
-                            'paid_at' =>
-                                $data[
-                                    'paid_at'
-                                ] ?? now(),
-
-                            'notes' =>
-                                'دفعة صيانة سريعة',
-                        ]
-                    );
-
-                    $order =
-                        $order->fresh();
-                }
-
-                if (
-                    (
-                        $data[
-                            'finish_status'
-                        ] ?? 'delivered'
-                    )
-                    === RepairOrderStatus
-                        ::DELIVERED
-                        ->value
-                ) {
-                    $order =
-                        $this->deliver(
-                            $order,
-                            [
-                                'payment_amount' =>
-                                    0,
-
-                                'allow_partial_payment' =>
-                                    (bool) (
-                                        $data[
-                                            'allow_partial_payment'
-                                        ] ?? false
-                                    ),
-                            ]
-                        );
-                }
-
-                $this
-                    ->invalidateDashboardCache();
-
-                return $order
-                    ->fresh()
-                    ->load([
-                        'customer',
-                        'parts.product',
-                        'parts.warehouse',
-                        'payments.financialAccount',
-                        'statusHistories',
-                    ]);
+            foreach ($data['stock_parts'] ?? [] as $partData) {
+                $this->addStockPart($order, $partData);
             }
-        );
+
+            foreach ($data['external_parts'] ?? [] as $partData) {
+                $part = $this->addExternalPartDraft($order, $partData);
+
+                if (($partData['purchase_mode'] ?? 'draft') === 'purchased') {
+                    $this->completeExternalPartPurchase($part, $partData);
+                }
+            }
+
+            $this->syncWaitingPartStatus($order);
+            $this->recalculateCosts($order);
+            $this->invalidateDashboardCache();
+
+            return $order->fresh()->load([
+                'customer',
+                'attachments',
+                'parts.product',
+                'parts.warehouse',
+                'externalParts.supplier',
+                'externalParts.financialAccount',
+                'payments.financialAccount',
+                'statusHistories',
+            ]);
+        });
     }
 
     /**
@@ -653,7 +273,367 @@ class RepairOrderService
     }
 
     /**
-     * إضافة قطعة غيار للطلب (غير معتمدة)
+     * تحديث البيانات الأساسية والسعر المتفق عليه بدون المرور بمراحل معقدة.
+     */
+    public function updateDetails(RepairOrder $order, array $data): RepairOrder
+    {
+        return DB::transaction(function () use ($order, $data) {
+            $lockedOrder = RepairOrder::query()
+                ->whereKey($order->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (in_array($lockedOrder->status, [RepairOrderStatus::DELIVERED, RepairOrderStatus::CANCELLED], true)) {
+                throw new \RuntimeException('لا يمكن تعديل طلب تم تسليمه أو إلغاؤه.');
+            }
+
+            $agreedPrice = array_key_exists('agreed_price', $data)
+                ? round((float) $data['agreed_price'], 2)
+                : (float) ($lockedOrder->agreed_price ?? $lockedOrder->total_amount);
+
+            if ($agreedPrice < (float) $lockedOrder->paid_amount) {
+                throw new \RuntimeException('السعر المتفق عليه لا يمكن أن يكون أقل من المبلغ المدفوع بالفعل.');
+            }
+
+            $lockedOrder->update([
+                'inspection_result' => $data['inspection_result'] ?? $lockedOrder->inspection_result,
+                'fault_cause' => array_key_exists('fault_cause', $data) ? $data['fault_cause'] : $lockedOrder->fault_cause,
+                'repair_action' => $data['repair_action'] ?? $lockedOrder->repair_action,
+                'technician_name' => array_key_exists('technician_name', $data) ? $data['technician_name'] : $lockedOrder->technician_name,
+                'agreed_price' => $agreedPrice,
+                'estimated_cost' => $agreedPrice,
+                'expected_delivery_date' => array_key_exists('expected_delivery_date', $data)
+                    ? $data['expected_delivery_date']
+                    : $lockedOrder->expected_delivery_date,
+                'internal_notes' => array_key_exists('internal_notes', $data)
+                    ? $data['internal_notes']
+                    : $lockedOrder->internal_notes,
+            ]);
+
+            $this->recalculateCosts($lockedOrder);
+            $this->invalidateDashboardCache();
+
+            return $lockedOrder->fresh();
+        });
+    }
+
+    /**
+     * إضافة قطعة موجودة في مخزن الصيانة وخصمها فوراً.
+     */
+    public function addStockPart(RepairOrder $order, array $data): RepairPart
+    {
+        return DB::transaction(function () use ($order, $data) {
+            $lockedOrder = RepairOrder::query()
+                ->whereKey($order->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (! in_array($lockedOrder->status, [RepairOrderStatus::RECEIVED, RepairOrderStatus::IN_PROGRESS], true)) {
+                throw new \RuntimeException('لا يمكن إضافة قطعة مخزون في حالة الطلب الحالية.');
+            }
+
+            $product = Product::query()
+                ->whereKey((int) $data['product_id'])
+                ->where('is_active', true)
+                ->firstOrFail();
+
+            $warehouse = $this->maintenanceWarehouse();
+            $quantity = (int) $data['quantity'];
+
+            $stock = ProductStock::query()
+                ->where('product_id', $product->id)
+                ->where('warehouse_id', $warehouse->id)
+                ->lockForUpdate()
+                ->first();
+
+            $available = (int) ($stock?->quantity ?? 0);
+            if ($quantity <= 0 || $available < $quantity) {
+                throw new \RuntimeException("الكمية غير متوفرة للقطعة {$product->name}. المتوفر: {$available}");
+            }
+
+            $unitCost = round((float) $product->purchase_price, 2);
+            $unitPrice = round((float) ($data['unit_price'] ?? $product->selling_price), 2);
+
+            $part = RepairPart::create([
+                'repair_order_id' => $lockedOrder->id,
+                'product_id' => $product->id,
+                'warehouse_id' => $warehouse->id,
+                'product_name' => $product->name,
+                'quantity' => $quantity,
+                'unit_cost' => $unitCost,
+                'unit_price' => $unitPrice,
+                'total_cost' => round($unitCost * $quantity, 2),
+                'total_price' => round($unitPrice * $quantity, 2),
+                'is_committed' => true,
+                'committed_at' => now(),
+            ]);
+
+            $before = $available;
+            $after = $before - $quantity;
+            $stock->update(['quantity' => $after]);
+
+            StockMovement::create([
+                'product_id' => $product->id,
+                'warehouse_id' => $warehouse->id,
+                'type' => StockMovementType::REPAIR_PART,
+                'quantity' => $quantity,
+                'quantity_before' => $before,
+                'quantity_after' => $after,
+                'notes' => "استخدام في طلب صيانة {$lockedOrder->order_number}",
+                'reference_type' => 'repair_order',
+                'reference_id' => $lockedOrder->id,
+            ]);
+
+            $this->recalculateCosts($lockedOrder);
+            $this->invalidateDashboardCache();
+
+            return $part->fresh(['product', 'warehouse']);
+        });
+    }
+
+    /**
+     * إضافة قطعة خارجية. لا يحدث أي خصم مالي وهي Draft.
+     */
+    public function addExternalPartDraft(RepairOrder $order, array $data): RepairExternalPart
+    {
+        return DB::transaction(function () use ($order, $data) {
+            $lockedOrder = RepairOrder::query()
+                ->whereKey($order->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (! in_array($lockedOrder->status, [RepairOrderStatus::RECEIVED, RepairOrderStatus::IN_PROGRESS], true)) {
+                throw new \RuntimeException('لا يمكن إضافة قطعة خارجية في حالة الطلب الحالية.');
+            }
+
+            $quantity = max(1, (int) ($data['quantity'] ?? 1));
+            $customerUnitPrice = round((float) ($data['customer_unit_price'] ?? 0), 2);
+
+            $part = RepairExternalPart::create([
+                'repair_order_id' => $lockedOrder->id,
+                'supplier_id' => $data['supplier_id'] ?? null,
+                'part_name' => trim((string) $data['part_name']),
+                'quantity' => $quantity,
+                'status' => RepairExternalPartStatus::DRAFT,
+                'purchase_from' => $data['purchase_from'] ?? null,
+                'supplier_phone' => $data['supplier_phone'] ?? null,
+                'customer_unit_price' => $customerUnitPrice,
+                'total_customer_price' => round($customerUnitPrice * $quantity, 2),
+                'notes' => $data['notes'] ?? null,
+            ]);
+
+            $this->syncWaitingPartStatus($lockedOrder);
+            $this->recalculateCosts($lockedOrder);
+            $this->invalidateDashboardCache();
+
+            return $part->fresh(['supplier']);
+        });
+    }
+
+    /**
+     * تسجيل شراء القطعة الخارجية وخصم قيمتها من الحساب المحدد.
+     */
+    public function completeExternalPartPurchase(RepairExternalPart $part, array $data): RepairExternalPart
+    {
+        return DB::transaction(function () use ($part, $data) {
+            $lockedPart = RepairExternalPart::query()
+                ->whereKey($part->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($lockedPart->status !== RepairExternalPartStatus::DRAFT) {
+                throw new \RuntimeException('هذه القطعة لم تعد بانتظار الشراء.');
+            }
+
+            $order = RepairOrder::query()
+                ->whereKey($lockedPart->repair_order_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (in_array($order->status, [RepairOrderStatus::READY, RepairOrderStatus::DELIVERED, RepairOrderStatus::CANCELLED], true)) {
+                throw new \RuntimeException('لا يمكن تسجيل شراء قطعة لطلب منتهٍ أو ملغي.');
+            }
+
+            $quantity = (int) $lockedPart->quantity;
+            $unitPurchasePrice = round((float) $data['unit_purchase_price'], 2);
+            if ($unitPurchasePrice <= 0) {
+                throw new \RuntimeException('سعر شراء القطعة يجب أن يكون أكبر من صفر.');
+            }
+
+            $purchasedAt = Carbon::parse($data['purchased_at'] ?? now());
+            if ($purchasedAt->isFuture()) {
+                throw new \RuntimeException('تاريخ شراء القطعة لا يمكن أن يكون في المستقبل.');
+            }
+            if ($order->received_at && $purchasedAt->lt(Carbon::parse($order->received_at))) {
+                throw new \RuntimeException('تاريخ شراء القطعة لا يمكن أن يسبق استلام الجهاز.');
+            }
+
+            $supplier = null;
+            if (! empty($data['supplier_id'])) {
+                $supplier = Supplier::query()->findOrFail((int) $data['supplier_id']);
+            }
+
+            $purchaseFrom = trim((string) ($data['purchase_from'] ?? ''));
+            if ($purchaseFrom === '' && $supplier) {
+                $purchaseFrom = (string) ($supplier->company_name ?: $supplier->name);
+            }
+            if ($purchaseFrom === '') {
+                throw new \RuntimeException('حدد من أين تم شراء القطعة.');
+            }
+
+            $account = FinancialAccount::query()
+                ->active()
+                ->findOrFail((int) $data['financial_account_id']);
+
+            $totalCost = round($unitPurchasePrice * $quantity, 2);
+
+            $transaction = $this->financeService->addOutflow(
+                $account,
+                TransactionType::REPAIR_PART_PURCHASE,
+                $totalCost,
+                "شراء قطعة صيانة خارجية - {$order->order_number} - {$lockedPart->part_name}",
+                $lockedPart,
+                $data['notes'] ?? null,
+                $purchasedAt
+            );
+
+            $lockedPart->update([
+                'supplier_id' => $supplier?->id,
+                'financial_account_id' => $account->id,
+                'financial_transaction_id' => $transaction->id,
+                'status' => RepairExternalPartStatus::PURCHASED,
+                'purchase_from' => $purchaseFrom,
+                'supplier_phone' => $data['supplier_phone'] ?? $lockedPart->supplier_phone,
+                'purchase_reference' => $data['purchase_reference'] ?? null,
+                'unit_purchase_price' => $unitPurchasePrice,
+                'total_purchase_cost' => $totalCost,
+                'customer_unit_price' => array_key_exists('customer_unit_price', $data)
+                    ? round((float) $data['customer_unit_price'], 2)
+                    : $lockedPart->customer_unit_price,
+                'total_customer_price' => round(
+                    (float) (array_key_exists('customer_unit_price', $data)
+                        ? $data['customer_unit_price']
+                        : $lockedPart->customer_unit_price) * $quantity,
+                    2
+                ),
+                'purchased_at' => $purchasedAt,
+                'notes' => $data['notes'] ?? $lockedPart->notes,
+            ]);
+
+            $this->syncWaitingPartStatus($order);
+            $this->recalculateCosts($order);
+            $this->invalidateDashboardCache();
+
+            return $lockedPart->fresh(['supplier', 'financialAccount', 'financialTransaction']);
+        });
+    }
+
+    /**
+     * إزالة مسودة قطعة خارجية قبل شرائها.
+     */
+    public function removeExternalPartDraft(RepairExternalPart $part): void
+    {
+        DB::transaction(function () use ($part): void {
+            $lockedPart = RepairExternalPart::query()
+                ->whereKey($part->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($lockedPart->status !== RepairExternalPartStatus::DRAFT) {
+                throw new \RuntimeException('لا يمكن حذف قطعة تم شراؤها. استخدم إرجاع القطعة إذا تم ردها للمحل الخارجي.');
+            }
+
+            $order = RepairOrder::query()
+                ->whereKey($lockedPart->repair_order_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $lockedPart->delete();
+            $this->syncWaitingPartStatus($order);
+            $this->recalculateCosts($order);
+            $this->invalidateDashboardCache();
+        });
+    }
+
+    /**
+     * إرجاع قطعة خارجية إلى مصدرها وعكس حركة الشراء المالية.
+     */
+    public function returnExternalPart(RepairExternalPart $part, string $reason): RepairExternalPart
+    {
+        return DB::transaction(function () use ($part, $reason) {
+            $lockedPart = RepairExternalPart::query()
+                ->whereKey($part->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($lockedPart->status !== RepairExternalPartStatus::PURCHASED) {
+                throw new \RuntimeException('يمكن إرجاع القطعة الخارجية بعد تسجيل شرائها فقط.');
+            }
+
+            $order = RepairOrder::query()
+                ->whereKey($lockedPart->repair_order_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($order->status === RepairOrderStatus::DELIVERED) {
+                throw new \RuntimeException('لا يمكن إرجاع قطعة خارجية بعد تسليم الجهاز.');
+            }
+
+            $transaction = $lockedPart->financialTransaction;
+            if (! $transaction) {
+                $transaction = FinancialTransaction::query()
+                    ->where('reference_type', $lockedPart->getMorphClass())
+                    ->where('reference_id', $lockedPart->id)
+                    ->where('type', TransactionType::REPAIR_PART_PURCHASE->value)
+                    ->orderBy('id')
+                    ->first();
+            }
+
+            if (! $transaction) {
+                throw new \RuntimeException('تعذر العثور على الحركة المالية الأصلية لشراء القطعة.');
+            }
+
+            $this->financeService->reverseTransaction(
+                $transaction,
+                "إرجاع قطعة صيانة خارجية {$lockedPart->part_name}: {$reason}"
+            );
+
+            $lockedPart->update([
+                'status' => RepairExternalPartStatus::RETURNED,
+                'returned_at' => now(),
+                'notes' => trim(($lockedPart->notes ? $lockedPart->notes . "\n" : '') . "إرجاع: {$reason}"),
+            ]);
+
+            $this->syncWaitingPartStatus($order);
+            $this->recalculateCosts($order);
+            $this->invalidateDashboardCache();
+
+            return $lockedPart->fresh(['financialAccount', 'financialTransaction']);
+        });
+    }
+
+    protected function syncWaitingPartStatus(RepairOrder $order): void
+    {
+        $order->refresh();
+
+        if (! in_array($order->status, [RepairOrderStatus::RECEIVED, RepairOrderStatus::IN_PROGRESS], true)) {
+            return;
+        }
+
+        $hasPendingExternal = $order->externalParts()
+            ->where('status', RepairExternalPartStatus::DRAFT->value)
+            ->exists();
+
+        $order->update([
+            'sub_status' => $hasPendingExternal
+                ? RepairSubStatus::WAITING_PART
+                : RepairSubStatus::NONE,
+        ]);
+    }
+
+    /**
+     * إضافة قطعة غيار للطلب (Legacy: غير معتمدة).
+     * الطلبات الجديدة تستخدم addStockPart() ويتم الخصم فوراً.
      */
     public function addPart(RepairOrder $order, array $data): RepairPart
     {
@@ -1018,17 +998,41 @@ class RepairOrderService
      */
     protected function recalculateCosts(RepairOrder $order): void
     {
-        $committedParts = $order->parts()->where('is_committed', true)->get();
+        $order->refresh();
 
-        $partsCost = $committedParts->sum('total_cost');
-        $partsPrice = $committedParts->sum('total_price');
+        $committedStockParts = $order->parts()
+            ->where('is_committed', true)
+            ->get();
 
-        $totalAmount = ($order->inspection_fee ?? 0) + ($order->labor_cost ?? 0) + $partsPrice;
+        $purchasedExternalParts = $order->externalParts()
+            ->where('status', RepairExternalPartStatus::PURCHASED->value)
+            ->get();
+
+        $stockCost = (float) $committedStockParts->sum('total_cost');
+        $stockPrice = (float) $committedStockParts->sum('total_price');
+        $externalCost = (float) $purchasedExternalParts->sum('total_purchase_cost');
+        $externalPrice = (float) $purchasedExternalParts->sum('total_customer_price');
+
+        $partsCost = round($stockCost + $externalCost, 2);
+
+        /*
+         * الطلبات الجديدة تعتمد السعر المتفق عليه مع العميل كإجمالي نهائي.
+         * الطلبات القديمة التي لا تملك agreed_price تستمر بالمعادلة القديمة.
+         */
+        $totalAmount = $order->agreed_price !== null
+            ? round((float) $order->agreed_price, 2)
+            : round(
+                (float) ($order->inspection_fee ?? 0)
+                + (float) ($order->labor_cost ?? 0)
+                + $stockPrice
+                + $externalPrice,
+                2
+            );
 
         $order->update([
             'parts_cost' => $partsCost,
             'total_amount' => $totalAmount,
-            'remaining_amount' => $totalAmount - $order->paid_amount,
+            'remaining_amount' => max(0, $totalAmount - (float) $order->paid_amount),
         ]);
 
         $this->updatePaymentStatus($order);
@@ -1138,37 +1142,44 @@ class RepairOrderService
     /**
      * تجهيز الجهاز للاستلام
      */
-    public function markAsReady(RepairOrder $order, array $data): RepairOrder
+    public function markAsReady(RepairOrder $order, array $data = []): RepairOrder
     {
-        if ($order->status !== RepairOrderStatus::IN_PROGRESS) {
-            throw new \Exception('لا يمكن تجهيز جهاز غير قيد التنفيذ');
-        }
+        return DB::transaction(function () use ($order, $data) {
+            $lockedOrder = RepairOrder::query()
+                ->whereKey($order->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        if (!$order->inspection_result) {
-            throw new \Exception('يجب تسجيل نتيجة الفحص قبل التجهيز');
-        }
+            if ($lockedOrder->status !== RepairOrderStatus::IN_PROGRESS) {
+                throw new \RuntimeException('يمكن تجهيز جهاز قيد التنفيذ فقط.');
+            }
 
-        if ($order->customer_approval_status === CustomerApprovalStatus::PENDING) {
-            throw new \Exception('يجب الحصول على موافقة العميل');
-        }
+            if (! filled($lockedOrder->inspection_result) || ! filled($lockedOrder->repair_action)) {
+                throw new \RuntimeException('أكمل التشخيص والإصلاح المطلوب قبل تجهيز الجهاز.');
+            }
 
-        if ($order->parts()->where('is_committed', false)->exists()) {
-            throw new \Exception('يجب اعتماد قطع الغيار أو حذفها قبل تجهيز الجهاز للاستلام');
-        }
+            if ($lockedOrder->externalParts()
+                ->where('status', RepairExternalPartStatus::DRAFT->value)
+                ->exists()) {
+                throw new \RuntimeException('يوجد قطع خارجية ما زالت بانتظار الشراء. سجّل شراءها أو احذف المسودة أولاً.');
+            }
 
-        // تحديث البيانات
-        $order->update([
-            'inspection_result' => $data['inspection_result'] ?? $order->inspection_result,
-            'repair_action' => $data['repair_action'] ?? $order->repair_action,
-            'labor_cost' => $data['labor_cost'] ?? $order->labor_cost,
-            'internal_notes' => $data['internal_notes'] ?? $order->internal_notes,
-        ]);
+            if ($lockedOrder->parts()->where('is_committed', false)->exists()) {
+                throw new \RuntimeException('يوجد قطع قديمة غير معتمدة. اعتمدها أو أعدها قبل تجهيز الجهاز.');
+            }
 
-        // إعادة حساب التكاليف
-        $this->recalculateCosts($order);
+            if (array_key_exists('internal_notes', $data)) {
+                $lockedOrder->update(['internal_notes' => $data['internal_notes']]);
+            }
 
-        // تحديث الحالة
-        return $this->updateStatus($order, RepairOrderStatus::READY->value, 'تم تجهيز الجهاز للاستلام');
+            $this->recalculateCosts($lockedOrder);
+
+            return $this->updateStatus(
+                $lockedOrder,
+                RepairOrderStatus::READY->value,
+                'اكتملت الصيانة والجهاز جاهز للاستلام'
+            );
+        });
     }
 
     /**
@@ -1194,8 +1205,13 @@ class RepairOrderService
                     'financial_account_id' => $data['financial_account_id'] ?? null,
                     'bank_or_app_name' => $data['bank_or_app_name'] ?? null,
                     'transaction_reference' => $data['transaction_reference'] ?? null,
-                    'paid_at' => now(),
-                    'notes' => $data['payment_notes'] ?? null,
+                    'paid_at' =>
+                        $data['paid_at']
+                        ?? now(),
+
+                    'notes' =>
+                        $data['payment_notes']
+                        ?? null,
                 ]);
 
                 $lockedOrder->refresh();

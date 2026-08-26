@@ -95,6 +95,11 @@ class FinanceReportService
                 'expenses'
             ];
 
+        $repairPartPurchases =
+            (float) $flowSummary[
+                'repair_part_purchases'
+            ];
+
         /*
          * الحسابات المالية النشطة.
          *
@@ -281,6 +286,11 @@ class FinanceReportService
 
                 'expenses' => round(
                     $expenses,
+                    2
+                ),
+
+                'repair_part_purchases' => round(
+                    $repairPartPurchases,
                     2
                 ),
 

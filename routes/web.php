@@ -143,24 +143,27 @@ Route::middleware('auth')->group(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | الصيانة
+    | الصيانة - النظام المبسط
     |--------------------------------------------------------------------------
     */
     Route::get('/repairs', [RepairOrderController::class, 'index'])->name('repairs.index');
     Route::get('/repairs/create', [RepairOrderController::class, 'create'])->name('repairs.create');
     Route::post('/repairs', [RepairOrderController::class, 'store'])->name('repairs.store');
-    Route::get('/repairs/quick-create', [RepairOrderController::class, 'quickCreate'])->name('repairs.quick-create');
-    Route::post('/repairs/quick', [RepairOrderController::class, 'quickStore'])->name('repairs.quick-store');
+
     Route::get('/repairs/{repairOrder}', [RepairOrderController::class, 'show'])->name('repairs.show');
-    Route::post('/repairs/{repairOrder}/inspection', [RepairOrderController::class, 'updateInspection'])->name('repairs.inspection');
-    Route::post('/repairs/{repairOrder}/parts', [RepairOrderController::class, 'addPart'])->name('repairs.add-part');
-    Route::delete('/repairs/parts/{part}', [RepairOrderController::class, 'removePart'])->name('repairs.remove-part');
-    Route::post('/repairs/{repairOrder}/parts/commit', [RepairOrderController::class, 'commitParts'])->name('repairs.commit-parts');
-    Route::post('/repairs/parts/{part}/revert', [RepairOrderController::class, 'revertPart'])->name('repairs.revert-part');
-    Route::post('/repairs/{repairOrder}/status', [RepairOrderController::class, 'updateStatus'])->name('repairs.update-status');
+    Route::patch('/repairs/{repairOrder}/details', [RepairOrderController::class, 'updateDetails'])->name('repairs.update-details');
+
+    Route::post('/repairs/{repairOrder}/parts/stock', [RepairOrderController::class, 'addStockPart'])->name('repairs.parts.stock');
+    Route::post('/repairs/parts/{part}/revert', [RepairOrderController::class, 'revertStockPart'])->name('repairs.parts.stock-revert');
+
+    Route::post('/repairs/{repairOrder}/parts/external', [RepairOrderController::class, 'addExternalPart'])->name('repairs.parts.external');
+    Route::post('/repairs/external-parts/{externalPart}/purchase', [RepairOrderController::class, 'purchaseExternalPart'])->name('repairs.external-parts.purchase');
+    Route::delete('/repairs/external-parts/{externalPart}', [RepairOrderController::class, 'removeExternalPart'])->name('repairs.external-parts.destroy');
+    Route::post('/repairs/external-parts/{externalPart}/return', [RepairOrderController::class, 'returnExternalPart'])->name('repairs.external-parts.return');
+
     Route::post('/repairs/{repairOrder}/ready', [RepairOrderController::class, 'markAsReady'])->name('repairs.mark-ready');
-    Route::post('/repairs/{repairOrder}/deliver', [RepairOrderController::class, 'deliver'])->name('repairs.deliver');
     Route::post('/repairs/{repairOrder}/payments', [RepairOrderController::class, 'addPayment'])->name('repairs.add-payment');
+    Route::post('/repairs/{repairOrder}/deliver', [RepairOrderController::class, 'deliver'])->name('repairs.deliver');
     Route::post('/repairs/{repairOrder}/cancel', [RepairOrderController::class, 'cancel'])->name('repairs.cancel');
     Route::get('/repairs/{repairOrder}/print', [RepairOrderController::class, 'print'])->name('repairs.print');
 

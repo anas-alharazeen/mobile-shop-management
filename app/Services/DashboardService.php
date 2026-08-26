@@ -1978,7 +1978,11 @@ class DashboardService
             (float) $flowSummary['net_cash_flow'],
 
             'period_expenses' =>
-            (float) $flowSummary['expenses'],
+            (float) $flowSummary['expenses']
+            + (float) ($flowSummary['repair_part_purchases'] ?? 0),
+
+            'repair_part_purchases' =>
+            (float) ($flowSummary['repair_part_purchases'] ?? 0),
 
             'collected_sales' =>
             (float) $flowSummary['collected_sales'],
@@ -2008,7 +2012,8 @@ class DashboardService
             (float) $flowSummary['total_outflows'],
 
             'today_expenses' =>
-            (float) $flowSummary['expenses'],
+            (float) $flowSummary['expenses']
+            + (float) ($flowSummary['repair_part_purchases'] ?? 0),
 
             'recent_transactions' =>
             $recentTransactions,

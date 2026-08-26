@@ -139,6 +139,7 @@ class ReportPresentationService
                 'collected_repairs' => 'مقبوضات الصيانة',
                 'paid_to_suppliers' => 'المدفوع للموردين',
                 'expenses' => 'المصروفات',
+                'repair_part_purchases' => 'شراء قطع صيانة خارجية',
                 'net_cash_flow' => 'صافي التدفق النقدي',
                 'total_inflows' => 'إجمالي الوارد الفعلي',
                 'total_outflows' => 'إجمالي الصادر الفعلي',
@@ -204,7 +205,7 @@ class ReportPresentationService
                 ['key' => 'device_types', 'title' => 'الأجهزة حسب النوع', 'columns' => ['label' => 'النوع', 'value' => 'العدد']],
                 ['key' => 'faults', 'title' => 'الأعطال الأكثر تكراراً', 'columns' => ['label' => 'العطل', 'value' => 'العدد']],
                 ['key' => 'top_parts', 'title' => 'قطع الغيار الأكثر استخداماً', 'columns' => [
-                    'product.name' => 'القطعة', 'total_quantity' => 'الكمية',
+                    'product.name' => 'القطعة', 'source' => 'المصدر', 'total_quantity' => 'الكمية',
                 ]],
             ],
             'finance' => [

@@ -39,6 +39,7 @@ protected $with = ['customer'];
         'repair_action',
         'customer_approval_status',
         'estimated_cost',
+        'agreed_price',
         'inspection_fee',
         'labor_cost',
         'parts_cost',
@@ -71,6 +72,7 @@ protected $with = ['customer'];
         'delivered_at' => 'datetime',
         'warranty_expires_at' => 'datetime',
         'estimated_cost' => 'decimal:2',
+        'agreed_price' => 'decimal:2',
         'inspection_fee' => 'decimal:2',
         'labor_cost' => 'decimal:2',
         'parts_cost' => 'decimal:2',
@@ -94,6 +96,23 @@ protected $with = ['customer'];
     public function parts()
     {
         return $this->hasMany(RepairPart::class);
+    }
+
+    public function externalParts()
+    {
+        return $this->hasMany(RepairExternalPart::class);
+    }
+
+    public function pendingExternalParts()
+    {
+        return $this->hasMany(RepairExternalPart::class)
+            ->where('status', 'draft');
+    }
+
+    public function purchasedExternalParts()
+    {
+        return $this->hasMany(RepairExternalPart::class)
+            ->where('status', 'purchased');
     }
 
     public function committedParts()
@@ -134,8 +153,8 @@ protected $with = ['customer'];
 
     public function getProfitAttribute(): float
     {
-        // رسوم الفحص وأجرة الصيانة إيراد خدمة، والتكلفة المباشرة المسجلة هي تكلفة القطع.
-        return max(0, (float) $this->total_amount - (float) $this->parts_cost);
+        // الربح الحقيقي قد يكون سالباً إذا كانت تكلفة القطع أعلى من سعر الصيانة المتفق عليه.
+        return round((float) $this->total_amount - (float) $this->parts_cost, 2);
     }
 
     public function getPartsPriceTotalAttribute()
@@ -185,6 +204,25 @@ protected $with = ['customer'];
         return $this->status !== RepairOrderStatus::CANCELLED
             && $this->payment_status !== PaymentStatus::PAID
             && (float) $this->remaining_amount > 0;
+    }
+
+    public function getHasPendingExternalPartsAttribute(): bool
+    {
+        if ($this->relationLoaded('externalParts')) {
+            return $this->externalParts
+                ->contains(fn (RepairExternalPart $part): bool => $part->status?->value === 'draft');
+        }
+
+        return $this->pendingExternalParts()->exists();
+    }
+
+    public function getCanBeMarkedReadyAttribute(): bool
+    {
+        return $this->status === RepairOrderStatus::IN_PROGRESS
+            && filled($this->inspection_result)
+            && filled($this->repair_action)
+            && ! $this->has_pending_external_parts
+            && ! $this->parts()->where('is_committed', false)->exists();
     }
 
     public static function generateNumber(): string

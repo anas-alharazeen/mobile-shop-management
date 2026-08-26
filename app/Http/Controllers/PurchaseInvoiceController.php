@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Enums\PaymentMethod;
 use App\Enums\PaymentStatus;
 use App\Enums\PurchaseInvoiceStatus;
+use App\Http\Requests\SavePurchaseInvoiceRequest;
+use App\Models\Category;
 use App\Models\FinancialAccount;
 use App\Models\Product;
 use App\Models\PurchaseInvoice;
@@ -16,6 +18,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -388,6 +391,15 @@ class PurchaseInvoiceController extends Controller
                     ->orderBy('name')
                     ->get(),
 
+                'categories' =>
+                Category::query()
+                    ->active()
+                    ->orderBy('name')
+                    ->get([
+                        'id',
+                        'name',
+                    ]),
+
                 'paymentMethods' =>
                 PaymentMethod::selectableLabels(),
 
@@ -398,233 +410,100 @@ class PurchaseInvoiceController extends Controller
     }
 
     public function store(
-        Request $request
+        SavePurchaseInvoiceRequest $request
     ) {
-        $paymentRequired =
-            (float) $request->input(
-                'payment_amount',
-                0
-            ) > 0;
+        $validated =
+            $request->validated();
 
-        $validated = $request->validate([
-            'supplier_id' => [
-                'required',
-                Rule::exists(
-                    'suppliers',
-                    'id'
-                )->where(
-                    'is_active',
-                    true
-                ),
-            ],
-
-            'supplier_invoice_number' => [
-                'nullable',
-                'string',
-                'max:255',
-
-                Rule::unique(
-                    'purchase_invoices',
-                    'supplier_invoice_number'
-                )->where(
-                    fn($query) =>
-                    $query->where(
-                        'supplier_id',
-                        $request->input(
-                            'supplier_id'
-                        )
-                    )
-                ),
-            ],
-
-            'purchase_date' => [
-                'required',
-                'date',
-                'before_or_equal:today',
-            ],
-
-            'due_date' => [
-                'nullable',
-                'date',
-                'after_or_equal:purchase_date',
-            ],
-
-            'items' => [
-                'required',
-                'array',
-                'min:1',
-            ],
-
-            'items.*.product_id' => [
-                'required',
-                'distinct',
-                Rule::exists(
-                    'products',
-                    'id'
-                )->where(
-                    'is_active',
-                    true
-                ),
-            ],
-
-            'items.*.warehouse_id' => [
-                'required',
-                Rule::exists(
-                    'warehouses',
-                    'id'
-                )->where(
-                    'is_active',
-                    true
-                ),
-            ],
-
-            'items.*.quantity' => [
-                'required',
-                'integer',
-                'min:1',
-            ],
-
-            'items.*.unit_purchase_price' => [
-                'required',
-                'numeric',
-                'min:0',
-            ],
-
-            'items.*.line_discount' => [
-                'nullable',
-                'numeric',
-                'min:0',
-            ],
-
-            'discount_amount' => [
-                'nullable',
-                'numeric',
-                'min:0',
-            ],
-
-            'shipping_cost' => [
-                'nullable',
-                'numeric',
-                'min:0',
-            ],
-
-            'additional_expenses' => [
-                'nullable',
-                'numeric',
-                'min:0',
-            ],
-
-            'notes' => [
-                'nullable',
-                'string',
-                'max:500',
-            ],
-
-            'payment_amount' => [
-                'nullable',
-                'numeric',
-                'min:0',
-            ],
-
-            'payment_method' => [
-                Rule::requiredIf(
-                    $paymentRequired
-                ),
-                'nullable',
-                'string',
-                Rule::in(
-                    array_keys(
-                        PaymentMethod::selectableLabels()
-                    )
-                ),
-            ],
-
-            'financial_account_id' => [
-                Rule::requiredIf(
-                    $paymentRequired
-                ),
-                'nullable',
-                'integer',
-                Rule::exists(
-                    'financial_accounts',
-                    'id'
-                )->where(
-                    'is_active',
-                    true
-                ),
-            ],
-
-            'bank_or_app_name' => [
-                'nullable',
-                'string',
-                'max:255',
-            ],
-
-            'transaction_reference' => [
-                'nullable',
-                'string',
-                'max:255',
-            ],
-        ]);
-
-        /*
-         * إنشاء الفاتورة + الدفعة الأولية في Transaction واحدة.
-         * إذا فشلت الدفعة، لا تبقى فاتورة ناقصة في قاعدة البيانات.
-         */
-        $invoice = DB::transaction(
-            function () use (
-                $validated
-            ): PurchaseInvoice {
-                $invoice =
-                    $this->purchaseService
-                    ->create(
+        try {
+            /*
+             * إنشاء المنتجات الجديدة + الفاتورة + الدفعة الأولية
+             * كلها تحت Transaction واحدة.
+             *
+             * إذا فشلت أي خطوة لا يبقى Product ناقص
+             * أو فاتورة جزئية في قاعدة البيانات.
+             */
+            $invoice =
+                DB::transaction(
+                    function () use (
                         $validated
-                    );
+                    ): PurchaseInvoice {
+                        $invoice =
+                            $this->purchaseService
+                                ->create(
+                                    $validated
+                                );
 
-                if (
-                    (float) (
-                        $validated['payment_amount'] ?? 0
-                    ) > 0
-                ) {
-                    $this->purchaseService
-                        ->addPayment(
-                            $invoice,
-                            [
-                                'amount' =>
-                                (float) $validated['payment_amount'],
+                        if (
+                            (float) (
+                                $validated[
+                                    'payment_amount'
+                                ]
+                                ?? 0
+                            ) > 0
+                        ) {
+                            $this->purchaseService
+                                ->addPayment(
+                                    $invoice,
+                                    [
+                                        'amount' =>
+                                        (float) $validated[
+                                            'payment_amount'
+                                        ],
 
-                                'payment_method' =>
-                                $validated['payment_method'],
+                                        'payment_method' =>
+                                        $validated[
+                                            'payment_method'
+                                        ],
 
-                                /*
-                                 * إصلاح مهم:
-                                 * الحساب المالي المختار يصل فعلياً للخدمة.
-                                 */
-                                'financial_account_id' =>
-                                (int) $validated['financial_account_id'],
+                                        'financial_account_id' =>
+                                        (int) $validated[
+                                            'financial_account_id'
+                                        ],
 
-                                'bank_or_app_name' =>
-                                $validated['bank_or_app_name'] ?? null,
+                                        'bank_or_app_name' =>
+                                        $validated[
+                                            'bank_or_app_name'
+                                        ]
+                                            ?? null,
 
-                                'transaction_reference' =>
-                                $validated['transaction_reference'] ?? null,
+                                        'transaction_reference' =>
+                                        $validated[
+                                            'transaction_reference'
+                                        ]
+                                            ?? null,
 
-                                /*
-                                 * الدفعة الأولية التاريخية تتبع تاريخ الفاتورة.
-                                 * ترحيلها المالي يحدث عند اعتماد الفاتورة.
-                                 */
-                                'paid_at' =>
-                                $validated['purchase_date'],
+                                        /*
+                                         * الدفعة الأولية التاريخية
+                                         * تتبع تاريخ الفاتورة.
+                                         * ترحيلها المالي الحقيقي يحدث
+                                         * عند اعتماد الفاتورة.
+                                         */
+                                        'paid_at' =>
+                                        $validated[
+                                            'purchase_date'
+                                        ],
 
-                                'notes' =>
-                                'دفعة أولية عند إنشاء فاتورة الشراء',
-                            ]
-                        );
-                }
+                                        'notes' =>
+                                        'دفعة أولية عند إنشاء فاتورة الشراء',
+                                    ]
+                                );
+                        }
 
-                return $invoice->fresh();
-            }
-        );
+                        return $invoice
+                            ->fresh();
+                    }
+                );
+        } catch (\Throwable $e) {
+            report($e);
+
+            throw ValidationException
+                ::withMessages([
+                    'purchase' =>
+                    $e->getMessage()
+                        ?: 'تعذر إنشاء فاتورة الشراء.',
+                ]);
+        }
 
         return redirect()
             ->route(
@@ -633,7 +512,7 @@ class PurchaseInvoiceController extends Controller
             )
             ->with(
                 'success',
-                'تم إنشاء فاتورة الشراء كمسودة بنجاح. راجعها ثم اعتمدها لإضافة المخزون وترحيل الدفعات مالياً.'
+                'تم إنشاء فاتورة الشراء كمسودة. المنتجات الجديدة أضيفت تلقائياً برصيد صفر، وستدخل الكميات للمخزون فقط عند اعتماد الفاتورة.'
             );
     }
 
@@ -746,14 +625,26 @@ public function edit(
                     ->orderBy('name')
                     ->get(),
 
+                'categories' =>
+                Category::query()
+                    ->active()
+                    ->orderBy('name')
+                    ->get([
+                        'id',
+                        'name',
+                    ]),
+
                 'paymentMethods' =>
                 PaymentMethod::selectableLabels(),
+
+                'financialAccounts' =>
+                $this->financialAccounts(),
             ]
         );
     }
 
     public function update(
-        Request $request,
+        SavePurchaseInvoiceRequest $request,
         PurchaseInvoice $purchaseInvoice
     ) {
         if (
@@ -771,130 +662,22 @@ public function edit(
                 );
         }
 
-        $validated = $request->validate([
-            'supplier_id' => [
-                'required',
-                Rule::exists(
-                    'suppliers',
-                    'id'
-                )->where(
-                    'is_active',
-                    true
-                ),
-            ],
+        try {
+            $this->purchaseService
+                ->update(
+                    $purchaseInvoice,
+                    $request->validated()
+                );
+        } catch (\Throwable $e) {
+            report($e);
 
-            'supplier_invoice_number' => [
-                'nullable',
-                'string',
-                'max:255',
-
-                Rule::unique(
-                    'purchase_invoices',
-                    'supplier_invoice_number'
-                )
-                    ->where(
-                        fn($query) =>
-                        $query->where(
-                            'supplier_id',
-                            $request->input(
-                                'supplier_id'
-                            )
-                        )
-                    )
-                    ->ignore(
-                        $purchaseInvoice->id
-                    ),
-            ],
-
-            'purchase_date' => [
-                'required',
-                'date',
-                'before_or_equal:today',
-            ],
-
-            'due_date' => [
-                'nullable',
-                'date',
-                'after_or_equal:purchase_date',
-            ],
-
-            'items' => [
-                'required',
-                'array',
-                'min:1',
-            ],
-
-            'items.*.product_id' => [
-                'required',
-                'distinct',
-                Rule::exists(
-                    'products',
-                    'id'
-                )->where(
-                    'is_active',
-                    true
-                ),
-            ],
-
-            'items.*.warehouse_id' => [
-                'required',
-                Rule::exists(
-                    'warehouses',
-                    'id'
-                )->where(
-                    'is_active',
-                    true
-                ),
-            ],
-
-            'items.*.quantity' => [
-                'required',
-                'integer',
-                'min:1',
-            ],
-
-            'items.*.unit_purchase_price' => [
-                'required',
-                'numeric',
-                'min:0',
-            ],
-
-            'items.*.line_discount' => [
-                'nullable',
-                'numeric',
-                'min:0',
-            ],
-
-            'discount_amount' => [
-                'nullable',
-                'numeric',
-                'min:0',
-            ],
-
-            'shipping_cost' => [
-                'nullable',
-                'numeric',
-                'min:0',
-            ],
-
-            'additional_expenses' => [
-                'nullable',
-                'numeric',
-                'min:0',
-            ],
-
-            'notes' => [
-                'nullable',
-                'string',
-                'max:500',
-            ],
-        ]);
-
-        $this->purchaseService
-            ->update(
-                $purchaseInvoice,
-                $validated
-            );
+            throw ValidationException
+                ::withMessages([
+                    'purchase' =>
+                    $e->getMessage()
+                        ?: 'تعذر تحديث فاتورة الشراء.',
+                ]);
+        }
 
         return redirect()
             ->route(

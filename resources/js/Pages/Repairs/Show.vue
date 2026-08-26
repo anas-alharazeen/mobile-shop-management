@@ -1,1394 +1,176 @@
-<template>
-    <AuthenticatedLayout>
-        <template #header>
-            <div class="flex items-center justify-between">
-                <div>
-                    <h1 class="text-2xl font-bold text-gray-900 dark:text-white">
-                        تفاصيل طلب الصيانة
-                    </h1>
-                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                        {{ order.order_number }}
-                    </p>
-                </div>
-                <div class="flex gap-2">
-                    <Link
-                        :href="route('repairs.index')"
-                        class="flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-                    >
-                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                        </svg>
-                        القائمة
-                    </Link>
-                    <Link
-                        :href="route('repairs.print', order.id)"
-                        target="_blank"
-                        class="flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-                    >
-                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                        </svg>
-                        طباعة
-                    </Link>
-                </div>
-            </div>
-        </template>
-
-        <!-- حالة الطلب -->
-        <div class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-            <div class="flex flex-wrap items-center justify-between gap-4 p-6">
-                <div class="flex flex-wrap items-center gap-3">
-                    <span
-                        v-if="order.repair_mode === 'quick'"
-                        class="inline-flex items-center gap-1 rounded-full bg-violet-100 px-3 py-1.5 text-sm font-black text-violet-700 dark:bg-violet-950/30 dark:text-violet-300"
-                    >
-                        ⚡ صيانة سريعة
-                    </span>
-
-                    <span
-                        class="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium"
-                        :class="{
-                            'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400': order.status === 'received',
-                            'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400': order.status === 'in_progress',
-                            'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400': order.status === 'ready',
-                            'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300': order.status === 'delivered',
-                            'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400': order.status === 'cancelled'
-                        }"
-                    >
-                        {{ statuses[order.status] || order.status }}
-                    </span>
-                    <span v-if="order.sub_status !== 'none'" class="text-sm text-gray-500 dark:text-gray-400">
-                        {{ subStatuses[order.sub_status] || order.sub_status }}
-                    </span>
-                    <span
-                        class="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium"
-                        :class="{
-                            'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400': order.payment_status === 'unpaid',
-                            'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400': order.payment_status === 'partially_paid',
-                            'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400': order.payment_status === 'paid'
-                        }"
-                    >
-                        {{ order.payment_status === 'unpaid' ? 'غير مدفوعة' : order.payment_status === 'partially_paid' ? 'مدفوعة جزئياً' : 'مدفوعة بالكامل' }}
-                    </span>
-                    <span v-if="order.is_overdue" class="inline-block text-sm text-red-600 dark:text-red-400">
-                        تنبيه: متأخر
-                    </span>
-                </div>
-                <div class="text-right text-sm text-gray-500 dark:text-gray-400">
-                    <p>تاريخ الاستلام: {{ formatDate(order.received_at) }}</p>
-                    <p v-if="order.expected_delivery_date">التسليم المتوقع: {{ formatDate(order.expected_delivery_date) }}</p>
-                    <p v-if="order.completed_at">تاريخ الإنجاز: {{ formatDate(order.completed_at) }}</p>
-                    <p v-if="order.delivered_at">تاريخ التسليم: {{ formatDate(order.delivered_at) }}</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- الأزرار الإجرائية -->
-        <div v-if="order.status !== 'cancelled' || order.can_add_payment" class="mt-4 flex flex-wrap gap-2">
-            <button
-                v-if="order.status !== 'delivered' && order.can_be_edited"
-                @click="openInspectionModal"
-                class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
-            >
-                <svg class="inline h-4 w-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                تسجيل الفحص
-            </button>
-
-            <button
-                v-if="order.status !== 'delivered' && order.can_add_parts"
-                @click="openPartModal"
-                class="rounded-lg bg-purple-600 px-4 py-2 text-sm text-white hover:bg-purple-700"
-            >
-                <svg class="inline h-4 w-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                إضافة قطعة غيار
-            </button>
-
-            <button
-                v-if="order.status !== 'delivered' && order.can_be_completed"
-                @click="openReadyModal"
-                class="rounded-lg bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-700"
-            >
-                <svg class="inline h-4 w-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                </svg>
-                تجهيز للاستلام
-            </button>
-
-            <button
-                v-if="order.status !== 'delivered' && order.can_be_delivered"
-                @click="openDeliverModal"
-                class="rounded-lg bg-teal-600 px-4 py-2 text-sm text-white hover:bg-teal-700"
-            >
-                <svg class="inline h-4 w-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                </svg>
-                تسليم الجهاز
-            </button>
-
-            <button
-                v-if="order.can_add_payment"
-                @click="openPaymentModal"
-                class="rounded-lg bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700"
-            >
-                <svg class="inline h-4 w-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                تسجيل دفعة
-            </button>
-
-            <button
-                v-if="order.status !== 'delivered' && order.status !== 'cancelled'"
-                @click="openCancelModal"
-                class="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700"
-            >
-                <svg class="inline h-4 w-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                إلغاء الطلب
-            </button>
-        </div>
-
-        <!-- المحتوى الرئيسي -->
-        <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <div class="lg:col-span-2 space-y-6">
-                <!-- بيانات العميل -->
-                <div class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                    <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
-                        <h3 class="font-semibold text-gray-900 dark:text-white">بيانات العميل</h3>
-                    </div>
-                    <div class="p-6">
-                        <p class="font-medium text-gray-900 dark:text-white">{{ order.customer_name }}</p>
-                        <p class="text-sm text-gray-600 dark:text-gray-400">{{ order.customer_phone }}</p>
-                        <p v-if="order.customer" class="text-sm text-gray-500 dark:text-gray-400">
-                            كود العميل: {{ order.customer.code }}
-                        </p>
-                    </div>
-                </div>
-
-                <!-- بيانات الجهاز -->
-                <div class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                    <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
-                        <h3 class="font-semibold text-gray-900 dark:text-white">بيانات الجهاز</h3>
-                    </div>
-                    <div class="grid grid-cols-2 gap-4 p-6">
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">نوع الجهاز</p>
-                            <p class="font-medium text-gray-900 dark:text-white">{{ order.device_type }}</p>
-                        </div>
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">العلامة التجارية</p>
-                            <p class="font-medium text-gray-900 dark:text-white">{{ order.brand }}</p>
-                        </div>
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">الموديل</p>
-                            <p class="font-medium text-gray-900 dark:text-white">{{ order.model }}</p>
-                        </div>
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">اللون</p>
-                            <p class="font-medium text-gray-900 dark:text-white">{{ order.color || '-' }}</p>
-                        </div>
-                        <div class="col-span-2">
-                            <p class="text-xs text-gray-500 dark:text-gray-400">وصف المشكلة</p>
-                            <p class="font-medium text-gray-900 dark:text-white">{{ order.problem_description }}</p>
-                        </div>
-                        <div v-if="order.device_condition" class="col-span-2">
-                            <p class="text-xs text-gray-500 dark:text-gray-400">حالة الجهاز عند الاستلام</p>
-                            <p class="font-medium text-gray-900 dark:text-white">{{ order.device_condition }}</p>
-                        </div>
-                        <div v-if="order.received_accessories" class="col-span-2">
-                            <p class="text-xs text-gray-500 dark:text-gray-400">الملحقات المستلمة</p>
-                            <p class="font-medium text-gray-900 dark:text-white">{{ order.received_accessories }}</p>
-                        </div>
-                        <div v-if="order.lock_code_decrypted" class="col-span-2">
-                            <p class="text-xs text-gray-500 dark:text-gray-400">رمز القفل</p>
-                            <p class="font-medium text-gray-900 dark:text-white">{{ order.lock_code_decrypted }}</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- صور الجهاز -->
-                <div v-if="order.attachments && order.attachments.length > 0" class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                    <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
-                        <h3 class="font-semibold text-gray-900 dark:text-white">صور الجهاز</h3>
-                    </div>
-                    <div class="grid grid-cols-3 gap-4 p-6 sm:grid-cols-4">
-                        <div
-                            v-for="attachment in order.attachments"
-                            :key="attachment.id"
-                            class="cursor-pointer overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700"
-                            @click="openImage(attachment)"
-                        >
-                            <img
-                                :src="'/storage/' + attachment.file_path"
-                                class="h-24 w-full object-cover"
-                                :alt="'صورة ' + attachment.stage"
-                            />
-                            <p class="p-1 text-center text-xs text-gray-500 dark:text-gray-400">
-                                {{ attachmentStages[attachment.stage] || attachment.stage }}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- قطع الغيار -->
-                <div class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                    <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
-                        <h3 class="font-semibold text-gray-900 dark:text-white">قطع الغيار المستخدمة</h3>
-                    </div>
-                    <div class="overflow-x-auto p-4">
-                        <table v-if="order.parts && order.parts.length > 0" class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                            <thead class="bg-gray-50 dark:bg-gray-900/50">
-                                <tr>
-                                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">القطعة</th>
-                                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">الكمية</th>
-                                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">سعر الوحدة</th>
-                                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">الإجمالي</th>
-                                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">الحالة</th>
-                                    <th class="px-4 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400"></th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                                <tr v-for="part in order.parts" :key="part.id" class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                                    <td class="px-4 py-3">
-                                        <p class="font-medium text-gray-900 dark:text-white">{{ part.product_name }}</p>
-                                        <p class="text-xs text-gray-500 dark:text-gray-400">{{ part.product?.code }}</p>
-                                    </td>
-                                    <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{{ part.quantity }}</td>
-                                    <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{{ formatCurrency(part.unit_price) }}</td>
-                                    <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{{ formatCurrency(part.total_price) }}</td>
-                                    <td class="px-4 py-3">
-                                        <span
-                                            class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
-                                            :class="[
-                                                part.is_committed
-                                                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                                                    : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-                                            ]"
-                                        >
-                                            {{ part.is_committed ? 'معتمدة' : 'غير معتمدة' }}
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3 text-center">
-                                        <button
-                                            v-if="!part.is_committed && order.can_add_parts"
-                                            @click="removePart(part.id)"
-                                            class="rounded-lg p-1 text-red-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                                        >
-                                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                            </svg>
-                                        </button>
-                                        <button
-                                            v-if="part.is_committed && order.can_add_parts"
-                                            @click="openRevertModal(part)"
-                                            class="rounded-lg p-1 text-orange-400 hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20"
-                                        >
-                                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                            </svg>
-                                        </button>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                        <div v-else class="py-8 text-center text-gray-500 dark:text-gray-400">
-                            لا توجد قطع غيار مسجلة
-                        </div>
-                    </div>
-                    <div v-if="order.can_add_parts && order.parts.some(p => !p.is_committed)" class="border-t border-gray-200 p-4 dark:border-gray-700">
-                        <button
-                            @click="commitParts"
-                            class="rounded-lg bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-700"
-                        >
-                            اعتماد قطع الغيار
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Timeline -->
-                <div class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                    <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
-                        <h3 class="font-semibold text-gray-900 dark:text-white">رحلة الطلب</h3>
-                    </div>
-                    <div class="p-6">
-                        <div class="relative">
-                            <div class="absolute right-4 top-0 h-full w-0.5 bg-gray-200 dark:bg-gray-700"></div>
-                            <div v-for="(history, index) in order.status_histories" :key="index" class="relative mb-6 pr-10 last:mb-0">
-                                <div class="absolute right-0 top-1 h-4 w-4 rounded-full border-2 border-blue-500 bg-white dark:bg-gray-800"></div>
-                                <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-                                    <div class="flex flex-wrap items-center justify-between">
-                                        <div>
-                                            <span class="font-medium text-gray-900 dark:text-white">
-                                                {{ statuses[history.to_status] || history.to_status }}
-                                            </span>
-                                            <span v-if="history.from_status" class="text-sm text-gray-500 dark:text-gray-400">
-                                                (من {{ statuses[history.from_status] || history.from_status }})
-                                            </span>
-                                        </div>
-                                        <span class="text-sm text-gray-500 dark:text-gray-400">
-                                            {{ formatDateTime(history.created_at) }}
-                                        </span>
-                                    </div>
-                                    <p v-if="history.notes" class="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                                        {{ history.notes }}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- الشريط الجانبي -->
-            <div class="lg:col-span-1">
-                <div class="sticky top-6 space-y-4">
-                    <!-- ملخص التكاليف -->
-                    <div class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                        <div class="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-                            <h4 class="font-semibold text-gray-900 dark:text-white">ملخص التكاليف</h4>
-                        </div>
-                        <div class="space-y-3 p-4">
-                            <div class="flex justify-between text-sm">
-                                <span class="text-gray-500 dark:text-gray-400">تكلفة الفحص</span>
-                                <span class="font-medium text-gray-900 dark:text-white">{{ formatCurrency(order.inspection_fee) }}</span>
-                            </div>
-                            <div class="flex justify-between text-sm">
-                                <span class="text-gray-500 dark:text-gray-400">أجرة الصيانة</span>
-                                <span class="font-medium text-gray-900 dark:text-white">{{ formatCurrency(order.labor_cost) }}</span>
-                            </div>
-                            <div class="flex justify-between text-sm">
-                                <span class="text-gray-500 dark:text-gray-400">قطع الغيار</span>
-                                <span class="font-medium text-gray-900 dark:text-white">{{ formatCurrency(order.parts_cost) }}</span>
-                            </div>
-                            <div class="border-t border-gray-200 pt-3 dark:border-gray-700">
-                                <div class="flex justify-between text-lg font-bold">
-                                    <span class="text-gray-900 dark:text-white">الإجمالي</span>
-                                    <span class="text-blue-600 dark:text-blue-400">{{ formatCurrency(order.total_amount) }}</span>
-                                </div>
-                            </div>
-                            <div class="border-t border-gray-200 pt-3 dark:border-gray-700">
-                                <div class="flex justify-between">
-                                    <span class="text-green-600 dark:text-green-400">المدفوع</span>
-                                    <span class="font-medium text-green-600 dark:text-green-400">{{ formatCurrency(order.paid_amount) }}</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="text-red-600 dark:text-red-400">المتبقي</span>
-                                    <span class="font-medium text-red-600 dark:text-red-400">{{ formatCurrency(order.remaining_amount) }}</span>
-                                </div>
-                            </div>
-                            <div v-if="order.status === 'delivered'" class="border-t border-gray-200 pt-3 dark:border-gray-700">
-                                <div class="flex justify-between text-sm">
-                                    <span class="text-gray-500 dark:text-gray-400">الربح</span>
-                                    <span class="font-medium text-green-600 dark:text-green-400">{{ formatCurrency(order.profit) }}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- الدفعات -->
-                    <div v-if="order.payments && order.payments.length > 0" class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                        <div class="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-                            <h4 class="font-semibold text-gray-900 dark:text-white">سجل الدفعات</h4>
-                        </div>
-                        <div class="divide-y divide-gray-200 dark:divide-gray-700">
-                            <div v-for="payment in order.payments" :key="payment.id" class="p-4">
-                                <div class="flex justify-between">
-                                    <div>
-                                        <p class="font-medium text-gray-900 dark:text-white">{{ formatCurrency(payment.amount) }}</p>
-                                        <p class="text-xs text-gray-500 dark:text-gray-400">
-                                            {{ paymentMethods[payment.payment_method] || payment.payment_method }}
-                                        </p>
-                                        <p
-                                            v-if="payment.financial_account"
-                                            class="mt-1 text-[11px] font-semibold text-blue-600 dark:text-blue-300"
-                                        >
-                                            {{ payment.financial_account.name }}
-                                        </p>
-                                    </div>
-                                    <div class="text-right text-xs text-gray-500 dark:text-gray-400">
-                                        <p>{{ formatDateTime(payment.paid_at) }}</p>
-                                        <p v-if="payment.transaction_reference" class="text-gray-400">{{ payment.transaction_reference }}</p>
-                                    </div>
-                                </div>
-                                <p v-if="payment.notes" class="mt-1 text-xs text-gray-400">{{ payment.notes }}</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- ملاحظات -->
-                    <div v-if="order.internal_notes || order.customer_notes" class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                        <div class="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-                            <h4 class="font-semibold text-gray-900 dark:text-white">ملاحظات</h4>
-                        </div>
-                        <div class="space-y-3 p-4">
-                            <div v-if="order.customer_notes">
-                                <p class="text-xs text-gray-500 dark:text-gray-400">ملاحظات العميل</p>
-                                <p class="text-sm text-gray-900 dark:text-white">{{ order.customer_notes }}</p>
-                            </div>
-                            <div v-if="order.internal_notes">
-                                <p class="text-xs text-gray-500 dark:text-gray-400">ملاحظات داخلية</p>
-                                <p class="text-sm text-gray-900 dark:text-white">{{ order.internal_notes }}</p>
-                            </div>
-                            <div v-if="order.technician_name">
-                                <p class="text-xs text-gray-500 dark:text-gray-400">اسم الفني</p>
-                                <p class="text-sm text-gray-900 dark:text-white">{{ order.technician_name }}</p>
-                            </div>
-                            <div v-if="order.cancellation_reason">
-                                <p class="text-xs text-red-500 dark:text-red-400">سبب الإلغاء</p>
-                                <p class="text-sm text-red-600 dark:text-red-400">{{ order.cancellation_reason }}</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Modal الفحص -->
-        <Modal :show="modals.inspection.show" @close="modals.inspection.show = false">
-            <template #title>تسجيل الفحص</template>
-            <template #content>
-                <form @submit.prevent="submitInspection" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            نتيجة الفحص
-                        </label>
-                        <textarea
-                            v-model="inspectionForm.inspection_result"
-                            rows="3"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            placeholder="نتيجة الفحص..."
-                        />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            سبب العطل
-                        </label>
-                        <textarea
-                            v-model="inspectionForm.fault_cause"
-                            rows="2"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            placeholder="سبب العطل..."
-                        />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            الإجراء المنفذ
-                        </label>
-                        <textarea
-                            v-model="inspectionForm.repair_action"
-                            rows="2"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            placeholder="الإجراء المنفذ..."
-                        />
-                    </div>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                                أجرة الصيانة
-                            </label>
-                            <input
-                                v-model.number="inspectionForm.labor_cost"
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            />
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                                التكلفة التقديرية
-                            </label>
-                            <input
-                                v-model.number="inspectionForm.estimated_cost"
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            />
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            اسم الفني
-                        </label>
-                        <input
-                            v-model="inspectionForm.technician_name"
-                            type="text"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                        />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            حالة موافقة العميل
-                        </label>
-                        <select
-                            v-model="inspectionForm.customer_approval_status"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                        >
-                            <option value="not_required">لا تحتاج موافقة</option>
-                            <option value="pending">بانتظار الموافقة</option>
-                            <option value="approved">موافق</option>
-                            <option value="rejected">مرفوض</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            الحالة الفرعية
-                        </label>
-                        <select
-                            v-model="inspectionForm.sub_status"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                        >
-                            <option value="waiting_inspection">بانتظار الفحص</option>
-                            <option value="waiting_customer_approval">بانتظار موافقة العميل</option>
-                            <option value="waiting_part">بانتظار قطعة غيار</option>
-                            <option value="under_testing">تحت الاختبار</option>
-                            <option value="unrepairable">تعذر الإصلاح</option>
-                            <option value="returned_for_repair">مرتجع للصيانة</option>
-                            <option value="none">لا توجد حالة فرعية</option>
-                        </select>
-                    </div>
-                    <div class="flex justify-end gap-3">
-                        <button
-                            type="button"
-                            @click="modals.inspection.show = false"
-                            class="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
-                        >
-                            إلغاء
-                        </button>
-                        <button
-                            type="submit"
-                            :disabled="inspectionForm.processing"
-                            class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-70"
-                        >
-                            {{ inspectionForm.processing ? 'جاري الحفظ...' : 'حفظ' }}
-                        </button>
-                    </div>
-                </form>
-            </template>
-        </Modal>
-
-        <!-- Modal إضافة قطعة غيار -->
-        <Modal :show="modals.part.show" @close="modals.part.show = false">
-            <template #title>إضافة قطعة غيار</template>
-            <template #content>
-                <form @submit.prevent="submitPart" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            القطعة <span class="text-red-500">*</span>
-                        </label>
-                        <select
-                            v-model="partForm.product_id"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            required
-                        >
-                            <option value="">اختر القطعة</option>
-                            <option v-for="product in products" :key="product.id" :value="product.id">
-                                {{ product.name }} ({{ product.available_quantity }} متوفرة)
-                            </option>
-                        </select>
-                    </div>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                                الكمية <span class="text-red-500">*</span>
-                            </label>
-                            <input
-                                v-model.number="partForm.quantity"
-                                type="number"
-                                min="1"
-                                class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                                required
-                            />
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                                سعر البيع <span class="text-red-500">*</span>
-                            </label>
-                            <input
-                                v-model.number="partForm.unit_price"
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                                required
-                            />
-                        </div>
-                    </div>
-                    <div class="flex justify-end gap-3">
-                        <button
-                            type="button"
-                            @click="modals.part.show = false"
-                            class="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
-                        >
-                            إلغاء
-                        </button>
-                        <button
-                            type="submit"
-                            :disabled="partForm.processing"
-                            class="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-70"
-                        >
-                            {{ partForm.processing ? 'جاري الإضافة...' : 'إضافة' }}
-                        </button>
-                    </div>
-                </form>
-            </template>
-        </Modal>
-
-        <!-- Modal تجهيز للاستلام -->
-        <Modal :show="modals.ready.show" @close="modals.ready.show = false">
-            <template #title>تجهيز الجهاز للاستلام</template>
-            <template #content>
-                <form @submit.prevent="submitReady" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            نتيجة الاختبار النهائي
-                        </label>
-                        <textarea
-                            v-model="readyForm.inspection_result"
-                            rows="2"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            placeholder="نتيجة الاختبار النهائي..."
-                        />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            الإجراء المنفذ
-                        </label>
-                        <textarea
-                            v-model="readyForm.repair_action"
-                            rows="2"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            placeholder="الإجراء النهائي..."
-                        />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            أجرة الصيانة النهائية
-                        </label>
-                        <input
-                            v-model.number="readyForm.labor_cost"
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                        />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            ملاحظات داخلية
-                        </label>
-                        <textarea
-                            v-model="readyForm.internal_notes"
-                            rows="2"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            placeholder="ملاحظات إضافية..."
-                        />
-                    </div>
-                    <div class="flex justify-end gap-3">
-                        <button
-                            type="button"
-                            @click="modals.ready.show = false"
-                            class="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
-                        >
-                            إلغاء
-                        </button>
-                        <button
-                            type="submit"
-                            :disabled="readyForm.processing"
-                            class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-70"
-                        >
-                            {{ readyForm.processing ? 'جاري التجهيز...' : 'تأكيد التجهيز' }}
-                        </button>
-                    </div>
-                </form>
-            </template>
-        </Modal>
-
-        <!-- تسجيل دفعة -->
-        <Modal
-            :show="modals.payment.show"
-            @close="closePaymentModal"
-        >
-            <template #title>
-                تسجيل دفعة صيانة
-            </template>
-
-            <template #content>
-                <div
-                    class="repair-payment-scroll max-h-[calc(100dvh-8.5rem)] overflow-y-auto overscroll-contain px-1 pb-1 sm:max-h-[calc(100dvh-9rem)]"
-                >
-                    <form
-                        class="space-y-4 pr-1"
-                        @submit.prevent="submitPayment"
-                    >
-                        <!-- بطاقة الطلب -->
-                        <section
-                            class="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800"
-                        >
-                            <div
-                                class="bg-gradient-to-l from-slate-950 via-amber-950 to-amber-600 p-4 text-white"
-                            >
-                                <div class="flex items-start justify-between gap-4">
-                                    <div class="min-w-0">
-                                        <div class="flex flex-wrap items-center gap-2">
-                                            <span
-                                                class="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-black text-amber-100 backdrop-blur"
-                                            >
-                                                Repair Payment
-                                            </span>
-
-                                            <span
-                                                dir="ltr"
-                                                class="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-black text-white backdrop-blur"
-                                            >
-                                                {{ order.order_number }}
-                                            </span>
-                                        </div>
-
-                                        <h3 class="mt-3 truncate text-lg font-black">
-                                            {{ order.customer_name || order.customer?.name || 'عميل' }}
-                                        </h3>
-
-                                        <p class="mt-1 truncate text-xs text-amber-100">
-                                            {{ order.device_type }}
-                                            <template v-if="order.brand">
-                                                · {{ order.brand }}
-                                            </template>
-                                            <template v-if="order.model">
-                                                {{ order.model }}
-                                            </template>
-                                        </p>
-                                    </div>
-
-                                    <div
-                                        class="shrink-0 rounded-2xl bg-white/10 px-3 py-2 text-left backdrop-blur"
-                                    >
-                                        <p class="text-[10px] text-amber-100">
-                                            المتبقي
-                                        </p>
-
-                                        <strong
-                                            dir="ltr"
-                                            class="mt-1 block text-lg font-black"
-                                        >
-                                            {{ formatCurrency(paymentCurrentRemaining) }}
-                                        </strong>
-                                    </div>
-                                </div>
-
-                                <div class="mt-4">
-                                    <div
-                                        class="mb-2 flex items-center justify-between text-[10px] text-amber-100"
-                                    >
-                                        <span>نسبة السداد الحالية</span>
-                                        <span dir="ltr">
-                                            {{ formatPercent(paymentProgressBefore) }}
-                                        </span>
-                                    </div>
-
-                                    <div
-                                        class="h-2 overflow-hidden rounded-full bg-white/15"
-                                    >
-                                        <div
-                                            class="h-full rounded-full bg-emerald-400 transition-all duration-300"
-                                            :style="{ width: `${paymentProgressBefore}%` }"
-                                        ></div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div
-                                class="grid grid-cols-3 divide-x divide-x-reverse divide-slate-100 dark:divide-slate-700"
-                            >
-                                <div class="p-3 text-center">
-                                    <p class="text-[10px] text-slate-400">
-                                        الإجمالي
-                                    </p>
-                                    <strong
-                                        dir="ltr"
-                                        class="mt-1 block text-sm text-slate-950 dark:text-white"
-                                    >
-                                        {{ formatCurrency(paymentCurrentTotal) }}
-                                    </strong>
-                                </div>
-
-                                <div class="p-3 text-center">
-                                    <p class="text-[10px] text-slate-400">
-                                        المدفوع
-                                    </p>
-                                    <strong
-                                        dir="ltr"
-                                        class="mt-1 block text-sm text-emerald-600"
-                                    >
-                                        {{ formatCurrency(paymentCurrentPaid) }}
-                                    </strong>
-                                </div>
-
-                                <div class="p-3 text-center">
-                                    <p class="text-[10px] text-slate-400">
-                                        المتبقي
-                                    </p>
-                                    <strong
-                                        dir="ltr"
-                                        class="mt-1 block text-sm text-rose-600"
-                                    >
-                                        {{ formatCurrency(paymentCurrentRemaining) }}
-                                    </strong>
-                                </div>
-                            </div>
-                        </section>
-
-                        <!-- قيمة الدفعة -->
-                        <section>
-                            <div class="flex items-end justify-between gap-3">
-                                <div>
-                                    <label
-                                        class="block text-sm font-black text-slate-800 dark:text-slate-100"
-                                    >
-                                        قيمة الدفعة
-                                    </label>
-                                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                        أدخل المبلغ أو اختر نسبة سريعة من المتبقي.
-                                    </p>
-                                </div>
-
-                                <span
-                                    dir="ltr"
-                                    class="text-[10px] font-bold text-slate-400"
-                                >
-                                    Max: {{ formatCurrency(paymentCurrentRemaining) }}
-                                </span>
-                            </div>
-
-                            <div class="relative mt-3">
-                                <input
-                                    v-model.number="paymentForm.amount"
-                                    type="number"
-                                    min="0.01"
-                                    :max="paymentCurrentRemaining"
-                                    step="0.01"
-                                    class="block w-full rounded-2xl border-2 border-slate-200 bg-slate-50 px-4 py-4 pl-20 text-xl font-black text-slate-950 shadow-sm transition focus:border-amber-500 focus:bg-white focus:ring-amber-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
-                                    required
-                                />
-
-                                <span
-                                    class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 rounded-lg bg-slate-200 px-2 py-1 text-xs font-black text-slate-600 dark:bg-slate-700 dark:text-slate-200"
-                                >
-                                    شيكل
-                                </span>
-                            </div>
-
-                            <div class="mt-3 grid grid-cols-3 gap-2">
-                                <button
-                                    type="button"
-                                    class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black text-slate-700 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-amber-950/30"
-                                    @click="setRepairQuickPayment('quarter')"
-                                >
-                                    25%
-                                </button>
-
-                                <button
-                                    type="button"
-                                    class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black text-slate-700 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-amber-950/30"
-                                    @click="setRepairQuickPayment('half')"
-                                >
-                                    50%
-                                </button>
-
-                                <button
-                                    type="button"
-                                    class="rounded-xl bg-amber-50 px-3 py-2.5 text-xs font-black text-amber-700 transition hover:bg-amber-100 dark:bg-amber-950/30 dark:text-amber-300"
-                                    @click="setRepairQuickPayment('full')"
-                                >
-                                    دفع المتبقي كامل
-                                </button>
-                            </div>
-                        </section>
-
-                        <!-- المعاينة -->
-                        <section
-                            class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60"
-                        >
-                            <div class="flex items-center justify-between gap-3">
-                                <div>
-                                    <h4 class="text-sm font-black text-slate-950 dark:text-white">
-                                        بعد تسجيل الدفعة
-                                    </h4>
-                                    <p class="mt-1 text-[10px] text-slate-400">
-                                        معاينة قبل الحفظ
-                                    </p>
-                                </div>
-
-                                <span
-                                    class="rounded-full px-2.5 py-1 text-[10px] font-black"
-                                    :class="repairPaymentStatusAfter.class"
-                                >
-                                    {{ repairPaymentStatusAfter.label }}
-                                </span>
-                            </div>
-
-                            <div class="mt-4 grid grid-cols-2 gap-3">
-                                <div
-                                    class="rounded-xl bg-white p-3 dark:bg-slate-800"
-                                >
-                                    <p class="text-[10px] text-slate-400">
-                                        إجمالي المدفوع
-                                    </p>
-                                    <strong
-                                        dir="ltr"
-                                        class="mt-1 block text-right text-base text-emerald-600"
-                                    >
-                                        {{ formatCurrency(paymentPaidAfter) }}
-                                    </strong>
-                                </div>
-
-                                <div
-                                    class="rounded-xl bg-white p-3 dark:bg-slate-800"
-                                >
-                                    <p class="text-[10px] text-slate-400">
-                                        المتبقي الجديد
-                                    </p>
-                                    <strong
-                                        dir="ltr"
-                                        class="mt-1 block text-right text-base text-amber-600"
-                                    >
-                                        {{ formatCurrency(paymentRemainingAfter) }}
-                                    </strong>
-                                </div>
-                            </div>
-
-                            <div class="mt-3">
-                                <div
-                                    class="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"
-                                >
-                                    <div
-                                        class="h-full rounded-full bg-emerald-500 transition-all duration-300"
-                                        :style="{ width: `${paymentProgressAfter}%` }"
-                                    ></div>
-                                </div>
-                            </div>
-                        </section>
-
-                        <!-- طريقة الدفع -->
-                        <section>
-                            <div class="flex items-center justify-between gap-3">
-                                <label
-                                    class="text-sm font-black text-slate-800 dark:text-slate-100"
-                                >
-                                    طريقة الدفع
-                                </label>
-                                <span class="text-[10px] text-slate-400">
-                                    {{ selectedRepairPaymentMethodLabel }}
-                                </span>
-                            </div>
-
-                            <div class="mt-3 grid gap-2 sm:grid-cols-3">
-                                <button
-                                    v-for="(label, value) in selectablePaymentMethods"
-                                    :key="value"
-                                    type="button"
-                                    class="rounded-2xl border p-3 text-right transition"
-                                    :class="
-                                        paymentForm.payment_method === value
-                                            ? 'border-amber-500 bg-amber-50 ring-2 ring-amber-500/10 dark:border-amber-500 dark:bg-amber-950/30'
-                                            : 'border-slate-200 bg-white hover:border-amber-200 dark:border-slate-700 dark:bg-slate-800'
-                                    "
-                                    @click="selectRepairPaymentMethod(value)"
-                                >
-                                    <span
-                                        class="block text-xs font-black text-slate-900 dark:text-white"
-                                    >
-                                        {{ label }}
-                                    </span>
-
-                                    <span
-                                        class="mt-1 block text-[10px] text-slate-400"
-                                    >
-                                        {{
-                                            value === 'cash'
-                                                ? 'تحصيل نقدي'
-                                                : value === 'bank_transfer'
-                                                    ? 'تحويل بنكي'
-                                                    : 'تطبيق بنكي'
-                                        }}
-                                    </span>
-                                </button>
-                            </div>
-                        </section>
-
-                        <!-- الحساب المالي -->
-                        <section>
-                            <label
-                                class="block text-sm font-black text-slate-800 dark:text-slate-100"
-                            >
-                                الحساب المالي
-                                <span class="mr-1 text-[10px] font-normal text-slate-400">
-                                    اختياري إذا كان النظام يختاره تلقائياً
-                                </span>
-                            </label>
-
-                            <div
-                                v-if="accountsFor(paymentForm.payment_method).length"
-                                class="mt-3 grid gap-2"
-                            >
-                                <button
-                                    v-for="account in accountsFor(paymentForm.payment_method)"
-                                    :key="account.id"
-                                    type="button"
-                                    class="flex items-center justify-between gap-4 rounded-2xl border p-3 text-right transition"
-                                    :class="
-                                        Number(paymentForm.financial_account_id) === Number(account.id)
-                                            ? 'border-amber-500 bg-amber-50 ring-2 ring-amber-500/10 dark:border-amber-500 dark:bg-amber-950/30'
-                                            : 'border-slate-200 bg-white hover:border-amber-300 dark:border-slate-700 dark:bg-slate-800'
-                                    "
-                                    @click="paymentForm.financial_account_id = account.id"
-                                >
-                                    <div>
-                                        <strong
-                                            class="block text-sm text-slate-900 dark:text-white"
-                                        >
-                                            {{ account.name }}
-                                        </strong>
-
-                                        <span class="mt-1 block text-[10px] text-slate-400">
-                                            {{ repairAccountTypeLabel(account.type) }}
-                                        </span>
-                                    </div>
-
-                                    <svg
-                                        v-if="Number(paymentForm.financial_account_id) === Number(account.id)"
-                                        class="h-5 w-5 text-amber-600"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M5 13l4 4L19 7"
-                                        />
-                                    </svg>
-                                </button>
-                            </div>
-
-                            <div
-                                v-else
-                                class="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs leading-6 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-                            >
-                                لا يوجد حساب مالي نشط متوافق مع طريقة الدفع الحالية.
-                            </div>
-                        </section>
-
-                        <!-- تفاصيل الدفع الإلكتروني -->
-                        <section
-                            v-if="isElectronic(paymentForm.payment_method)"
-                            class="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60 sm:grid-cols-2"
-                        >
-                            <label class="block">
-                                <span
-                                    class="text-xs font-bold text-slate-600 dark:text-slate-300"
-                                >
-                                    اسم البنك أو التطبيق
-                                </span>
-                                <input
-                                    v-model.trim="paymentForm.bank_or_app_name"
-                                    type="text"
-                                    maxlength="255"
-                                    class="mt-1.5 w-full rounded-xl border-slate-300 bg-white text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-white"
-                                    placeholder="مثال: بنك فلسطين"
-                                    required
-                                />
-                            </label>
-
-                            <label class="block">
-                                <span
-                                    class="text-xs font-bold text-slate-600 dark:text-slate-300"
-                                >
-                                    رقم العملية
-                                </span>
-                                <input
-                                    v-model.trim="paymentForm.transaction_reference"
-                                    type="text"
-                                    maxlength="255"
-                                    class="mt-1.5 w-full rounded-xl border-slate-300 bg-white text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-white"
-                                    placeholder="اختياري"
-                                />
-                            </label>
-                        </section>
-
-                        <!-- التاريخ والملاحظات -->
-                        <section class="grid gap-4 sm:grid-cols-2">
-                            <label class="block">
-                                <span
-                                    class="text-sm font-bold text-slate-700 dark:text-slate-300"
-                                >
-                                    تاريخ ووقت الدفع
-                                </span>
-                                <input
-                                    v-model="paymentForm.paid_at"
-                                    type="datetime-local"
-                                    class="mt-1.5 w-full rounded-xl border-slate-300 bg-white text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-white"
-                                    required
-                                />
-                            </label>
-
-                            <label class="block">
-                                <span
-                                    class="text-sm font-bold text-slate-700 dark:text-slate-300"
-                                >
-                                    ملاحظات
-                                </span>
-                                <textarea
-                                    v-model.trim="paymentForm.notes"
-                                    rows="2"
-                                    maxlength="500"
-                                    class="mt-1.5 w-full resize-none rounded-xl border-slate-300 bg-white text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-white"
-                                    placeholder="أي ملاحظة مرتبطة بالدفعة..."
-                                ></textarea>
-                            </label>
-                        </section>
-
-                        <div
-                            v-if="repairPaymentError || Object.keys(paymentForm.errors).length"
-                            class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300"
-                        >
-                            <p
-                                v-if="repairPaymentError"
-                                class="font-black"
-                            >
-                                {{ repairPaymentError }}
-                            </p>
-
-                            <p
-                                v-for="(error, key) in paymentForm.errors"
-                                :key="key"
-                                class="mt-1"
-                            >
-                                {{ error }}
-                            </p>
-                        </div>
-
-                        <!-- الإجراء النهائي -->
-                        <div
-                            class="sticky bottom-0 z-20 -mx-1 rounded-2xl border border-slate-800 bg-slate-950 p-4 text-white shadow-[0_-12px_30px_rgba(15,23,42,0.18)] dark:bg-slate-900"
-                        >
-                            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                <div>
-                                    <p class="text-[10px] text-slate-400">
-                                        سيتم تسجيل
-                                    </p>
-
-                                    <strong
-                                        dir="ltr"
-                                        class="mt-1 block text-lg"
-                                    >
-                                        {{ formatCurrency(repairPaymentAmount) }}
-                                    </strong>
-
-                                    <p
-                                        v-if="selectedRepairAccount"
-                                        class="mt-1 text-[10px] text-slate-400"
-                                    >
-                                        في {{ selectedRepairAccount.name }}
-                                    </p>
-                                </div>
-
-                                <div class="flex gap-2">
-                                    <button
-                                        type="button"
-                                        class="rounded-xl border border-slate-700 px-4 py-3 text-sm font-black text-slate-200 transition hover:bg-slate-800"
-                                        @click="closePaymentModal"
-                                    >
-                                        إلغاء
-                                    </button>
-
-                                    <button
-                                        type="submit"
-                                        :disabled="paymentForm.processing || Boolean(repairPaymentError)"
-                                        class="rounded-xl bg-amber-500 px-5 py-3 text-sm font-black text-slate-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        {{
-                                            paymentForm.processing
-                                                ? 'جارٍ تسجيل الدفعة...'
-                                                : paymentRemainingAfter <= 0.00001
-                                                    ? 'تسجيل الدفعة وإغلاق المستحق'
-                                                    : 'تأكيد تسجيل الدفعة'
-                                        }}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-            </template>
-        </Modal>
-
-        <!-- تسليم الجهاز -->
-        <Modal :show="modals.deliver.show" @close="modals.deliver.show = false">
-            <template #title>تسليم الجهاز للعميل</template>
-            <template #content>
-                <form class="space-y-4" @submit.prevent="submitDelivery">
-                    <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/30"><p class="font-bold text-emerald-800 dark:text-emerald-300">{{ order.device_type }} — {{ order.brand }} {{ order.model }}</p><p class="mt-1 text-sm text-emerald-700 dark:text-emerald-400">المتبقي قبل التسليم: {{ formatCurrency(order.remaining_amount) }}</p></div>
-                    <div v-if="Number(order.remaining_amount) > 0" class="space-y-4">
-                        <div class="grid gap-4 sm:grid-cols-2">
-                            <label class="block"><span class="text-sm font-medium text-slate-700 dark:text-slate-300">دفعة عند التسليم</span><input v-model.number="deliverForm.payment_amount" type="number" min="0" :max="Number(order.remaining_amount)" step="0.01" class="mt-1 w-full rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
-                            <label class="block"><span class="text-sm font-medium text-slate-700 dark:text-slate-300">طريقة الدفع</span><select v-model="deliverForm.payment_method" class="mt-1 w-full rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white"><option v-for="(label, value) in selectablePaymentMethods" :key="value" :value="value">{{ label }}</option></select></label>
-                            <label class="block"><span class="text-sm font-medium text-slate-700 dark:text-slate-300">الحساب المالي</span><select v-model="deliverForm.financial_account_id" class="mt-1 w-full rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white"><option value="">اختر الحساب المالي</option><option v-for="account in accountsFor(deliverForm.payment_method)" :key="account.id" :value="account.id">{{ account.name }}</option></select></label>
-                        </div>
-                        <div v-if="isElectronic(deliverForm.payment_method)" class="grid gap-4 sm:grid-cols-2"><input v-model="deliverForm.bank_or_app_name" class="w-full rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="اسم البنك أو التطبيق" /><input v-model="deliverForm.transaction_reference" class="w-full rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="رقم العملية" /></div>
-                        <p
-                            v-if="deliveryPaymentError"
-                            class="rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 dark:bg-rose-950/30 dark:text-rose-300"
-                        >
-                            {{ deliveryPaymentError }}
-                        </p>
-                        <label v-if="deliveryRemaining > 0" class="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/30"><input v-model="deliverForm.allow_partial_payment" type="checkbox" class="mt-1 rounded border-slate-300 text-amber-600" /><span class="text-sm text-amber-800 dark:text-amber-300">أوافق على تسليم الجهاز مع بقاء {{ formatCurrency(deliveryRemaining) }} مستحقة على العميل.</span></label>
-                    </div>
-                    <label class="block"><span class="text-sm font-medium text-slate-700 dark:text-slate-300">ملاحظات الدفع</span><textarea v-model="deliverForm.payment_notes" rows="2" class="mt-1 w-full rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
-                    <div class="flex justify-end gap-3"><button type="button" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800" @click="modals.deliver.show = false">إلغاء</button><button type="submit" :disabled="deliverForm.processing || Boolean(deliveryPaymentError) || (deliveryRemaining > 0 && !deliverForm.allow_partial_payment)" class="rounded-xl bg-teal-600 px-4 py-2 text-sm font-bold text-white hover:bg-teal-700 disabled:opacity-60">{{ deliverForm.processing ? 'جارٍ التسليم...' : 'تأكيد التسليم' }}</button></div>
-                </form>
-            </template>
-        </Modal>
-
-        <!-- إلغاء الطلب -->
-        <Modal :show="modals.cancel.show" @close="modals.cancel.show = false">
-            <template #title>إلغاء طلب الصيانة</template>
-            <template #content>
-                <form class="space-y-4" @submit.prevent="submitCancel">
-                    <div class="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm leading-6 text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-200">
-                        <p>
-                            سيبقى الطلب محفوظاً، وستُعاد القطع المعتمدة إلى مخازنها الأصلية.
-                        </p>
-                        <p
-                            v-if="Number(order.paid_amount || 0) > 0"
-                            class="mt-2 font-black"
-                        >
-                            توجد دفعات بقيمة {{ formatCurrency(order.paid_amount) }}.
-                            عند الإلغاء سيقوم النظام بإنشاء حركات عكس مالية وإرجاع المبالغ من نفس الحسابات الأصلية.
-                        </p>
-                    </div><label class="block"><span class="text-sm font-medium text-slate-700 dark:text-slate-300">سبب الإلغاء</span><textarea v-model="cancelForm.reason" rows="3" class="mt-1 w-full rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" required /></label><div class="flex justify-end gap-3"><button type="button" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800" @click="modals.cancel.show = false">رجوع</button><button type="submit" :disabled="cancelForm.processing" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-60">{{ cancelForm.processing ? 'جارٍ الإلغاء...' : 'تأكيد الإلغاء' }}</button></div></form>
-            </template>
-        </Modal>
-
-        <!-- إعادة قطعة -->
-        <Modal :show="modals.revert.show" @close="modals.revert.show = false">
-            <template #title>إعادة قطعة إلى مخزون الصيانة</template>
-            <template #content>
-                <form class="space-y-4" @submit.prevent="submitRevert"><p class="text-sm text-slate-600 dark:text-slate-400">القطعة: <strong class="text-slate-900 dark:text-white">{{ selectedPart?.product_name }}</strong></p><label class="block"><span class="text-sm font-medium text-slate-700 dark:text-slate-300">سبب الإعادة</span><textarea v-model="revertForm.reason" rows="3" class="mt-1 w-full rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" required /></label><div class="flex justify-end gap-3"><button type="button" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800" @click="modals.revert.show = false">إلغاء</button><button type="submit" :disabled="revertForm.processing" class="rounded-xl bg-orange-600 px-4 py-2 text-sm font-bold text-white hover:bg-orange-700 disabled:opacity-60">{{ revertForm.processing ? 'جارٍ الإعادة...' : 'إعادة القطعة' }}</button></div></form>
-            </template>
-        </Modal>
-
-        <!-- معاينة الصورة -->
-        <Modal :show="modals.image.show" @close="modals.image.show = false">
-            <template #title>معاينة صورة الجهاز</template>
-            <template #content><img v-if="selectedAttachment" :src="'/storage/' + selectedAttachment.file_path" alt="صورة الجهاز" class="max-h-[70vh] w-full rounded-xl object-contain" /></template>
-        </Modal>
-
-        <ConfirmationModal :show="Boolean(confirmation.action)" :title="confirmation.title" :message="confirmation.message" :loading="confirmation.processing" @close="closeConfirmation" @confirm="confirmAction" />
-    </AuthenticatedLayout>
-</template>
-
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { Link, router, useForm } from '@inertiajs/vue3';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import Modal from '@/Components/Modal.vue';
-import ConfirmationModal from '@/Components/ConfirmationModal.vue';
 
 const props = defineProps({
-    order: Object,
-    statuses: Object,
-    subStatuses: Object,
-    approvalStatuses: Object,
-    paymentMethods: Object,
-    attachmentStages: { type: Object, default: () => ({}) },
+    order: { type: Object, required: true },
+    products: { type: Array, default: () => [] },
+    suppliers: { type: Array, default: () => [] },
     financialAccounts: { type: Array, default: () => [] },
-    products: Array,
-});
-
-const modals = ref({
-    inspection: { show: false },
-    part: { show: false },
-    ready: { show: false },
-    deliver: { show: false },
-    payment: { show: false },
-    cancel: { show: false },
-    revert: { show: false },
-    image: { show: false },
-});
-
-const inspectionForm = useForm({
-    inspection_result: props.order.inspection_result || '',
-    fault_cause: props.order.fault_cause || '',
-    repair_action: props.order.repair_action || '',
-    labor_cost: props.order.labor_cost || 0,
-    estimated_cost: props.order.estimated_cost || 0,
-    technician_name: props.order.technician_name || '',
-    customer_approval_status: props.order.customer_approval_status || 'not_required',
-    sub_status: props.order.sub_status || 'waiting_inspection',
-});
-
-const partForm = useForm({
-    product_id: '',
-    quantity: 1,
-    unit_price: 0,
-});
-
-const readyForm = useForm({
-    inspection_result: props.order.inspection_result || '',
-    repair_action: props.order.repair_action || '',
-    labor_cost: props.order.labor_cost || 0,
-    internal_notes: props.order.internal_notes || '',
+    paymentMethods: { type: Object, default: () => ({}) },
+    maintenanceWarehouse: { type: Object, default: () => ({}) },
 });
 
 const nowLocal = () => {
-    const date = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
-    return date.toISOString().slice(0, 16);
+    const d = new Date(); const off = d.getTimezoneOffset();
+    return new Date(d.getTime() - off * 60000).toISOString().slice(0, 16);
 };
 
-const paymentForm = useForm({
-    amount: Number(props.order.remaining_amount || 0),
-    payment_method: 'cash',
-    financial_account_id: '',
-    bank_or_app_name: '',
-    transaction_reference: '',
-    paid_at: nowLocal(),
-    notes: '',
+const detailsOpen = ref(false);
+const partModal = ref(false);
+const partSource = ref('stock');
+const partProductSearch = ref('');
+const purchaseTarget = ref(null);
+const returnExternalTarget = ref(null);
+const revertStockTarget = ref(null);
+const paymentModal = ref(false);
+const deliverModal = ref(false);
+const cancelModal = ref(false);
+
+const intakeImageModal = ref(null);
+const lockCodeVisible = ref(false);
+const lockCodeCopied = ref(false);
+
+const attachmentStage = attachment =>
+    attachment?.stage?.value
+    ?? attachment?.stage
+    ?? '';
+
+const receivedAttachments = computed(() =>
+    (props.order.attachments || [])
+        .filter(attachment => {
+            const stage = attachmentStage(attachment);
+
+            return !stage
+                || stage === 'received';
+        })
+);
+
+const attachmentUrl = attachment => {
+    const path = String(
+        attachment?.file_path
+        || ''
+    );
+
+    if (!path) {
+        return '';
+    }
+
+    if (
+        path.startsWith('http://')
+        || path.startsWith('https://')
+        || path.startsWith('/storage/')
+    ) {
+        return path;
+    }
+
+    return `/storage/${path.replace(/^\/+/, '')}`;
+};
+
+const lockCode = computed(() =>
+    props.order.lock_code_decrypted
+    || ''
+);
+
+const copyLockCode = async () => {
+    if (!lockCode.value) {
+        return;
+    }
+
+    try {
+        await navigator.clipboard.writeText(
+            lockCode.value
+        );
+
+        lockCodeCopied.value = true;
+
+        window.setTimeout(
+            () => {
+                lockCodeCopied.value = false;
+            },
+            1600
+        );
+    } catch (_) {
+        lockCodeCopied.value = false;
+    }
+};
+
+const detailsForm = useForm({
+    inspection_result: props.order.inspection_result || '',
+    fault_cause: props.order.fault_cause || '',
+    repair_action: props.order.repair_action || '',
+    technician_name: props.order.technician_name || '',
+    agreed_price: Number(props.order.agreed_price ?? props.order.total_amount ?? 0),
+    expected_delivery_date: props.order.expected_delivery_date?.slice(0, 10) || '',
+    internal_notes: props.order.internal_notes || '',
 });
 
+const stockForm = useForm({ product_id: '', quantity: 1, unit_price: '' });
+const externalForm = useForm({ part_name: '', quantity: 1, supplier_id: '', purchase_from: '', supplier_phone: '', customer_unit_price: '', notes: '' });
+const purchaseForm = useForm({ supplier_id: '', purchase_from: '', supplier_phone: '', purchase_reference: '', unit_purchase_price: '', customer_unit_price: '', financial_account_id: '', purchased_at: nowLocal(), notes: '' });
+const returnExternalForm = useForm({ reason: '' });
+const revertStockForm = useForm({ reason: '' });
+const readyForm = useForm({ internal_notes: props.order.internal_notes || '' });
+const paymentForm = useForm({ amount: Number(props.order.remaining_amount || 0), payment_method: 'cash', financial_account_id: '', bank_or_app_name: '', transaction_reference: '', paid_at: nowLocal(), notes: '' });
 const deliverForm = useForm({
     payment_amount: Number(props.order.remaining_amount || 0),
     payment_method: 'cash',
     financial_account_id: '',
     bank_or_app_name: '',
     transaction_reference: '',
+    paid_at: nowLocal(),
     payment_notes: '',
     allow_partial_payment: false,
 });
-
 const cancelForm = useForm({ reason: '' });
-const revertForm = useForm({ reason: '' });
-const selectedPart = ref(null);
-const selectedAttachment = ref(null);
-const confirmation = ref({ action: null, partId: null, title: '', message: '', processing: false });
-const selectablePaymentMethods = computed(() =>
-    Object.fromEntries(
-        Object.entries(
-            props.paymentMethods || {}
-        ).filter(
-            ([key]) =>
-                key !== 'exchange_credit'
-        )
-    )
+
+const status = computed(() => props.order.status);
+const isEditable = computed(() => ['received', 'in_progress'].includes(status.value));
+const isReady = computed(() => status.value === 'ready');
+const isFinished = computed(() => ['delivered', 'cancelled'].includes(status.value));
+const committedStockParts = computed(() => (props.order.parts || []).filter(part => part.is_committed));
+const legacyPendingStockParts = computed(() => (props.order.parts || []).filter(part => !part.is_committed));
+const externalParts = computed(() => props.order.external_parts || []);
+const pendingExternal = computed(() => externalParts.value.filter(part => part.status === 'draft'));
+const purchasedExternal = computed(() => externalParts.value.filter(part => part.status === 'purchased'));
+const returnedExternal = computed(() => externalParts.value.filter(part => part.status === 'returned'));
+
+const statusMeta = computed(() => ({
+    received: ['مستلم', 'bg-blue-100 text-blue-700'],
+    in_progress: ['قيد التنفيذ', 'bg-amber-100 text-amber-700'],
+    ready: ['جاهز للاستلام', 'bg-emerald-100 text-emerald-700'],
+    delivered: ['تم التسليم', 'bg-slate-100 text-slate-700'],
+    cancelled: ['ملغي', 'bg-rose-100 text-rose-700'],
+}[status.value] || [status.value, 'bg-slate-100 text-slate-700']));
+
+const accountType = account =>
+    account?.type?.value
+    ?? account?.type
+    ?? '';
+
+const compatibleAccounts = method =>
+    props.financialAccounts.filter(
+        account =>
+            accountType(account)
+            === ({
+                cash: 'cash',
+                bank_transfer: 'bank',
+                banking_app: 'banking_app',
+            }[method] || '')
+    );
+
+const selectedDeliveryAccount = computed(() =>
+    props.financialAccounts.find(
+        account =>
+            Number(account.id)
+            === Number(
+                deliverForm.financial_account_id
+            )
+    ) || null
 );
 
-const deliveryRemaining = computed(() =>
+const deliveryRemainingAfterPayment = computed(() =>
     Math.max(
         0,
         Number(
@@ -1402,491 +184,479 @@ const deliveryRemaining = computed(() =>
     )
 );
 
-const deliveryPaymentError = computed(() => {
+const deliveryClientError = computed(() => {
     const amount =
         Number(
             deliverForm.payment_amount
             || 0
         );
 
-    if (amount < 0) {
-        return 'دفعة التسليم لا يمكن أن تكون سالبة.';
-    }
-
-    if (
-        amount
-        > Number(
+    const remaining =
+        Number(
             props.order.remaining_amount
             || 0
-        )
-    ) {
-        return 'دفعة التسليم أكبر من المبلغ المتبقي.';
+        );
+
+    if (amount < 0) {
+        return 'المبلغ المدفوع لا يمكن أن يكون سالباً.';
+    }
+
+    if (amount > remaining + 0.00001) {
+        return 'المبلغ المدفوع أكبر من المبلغ المتبقي.';
     }
 
     if (
         amount > 0
         && !deliverForm.payment_method
     ) {
-        return 'اختر طريقة دفع دفعة التسليم.';
-    }
-
-    if (
-        amount > 0
-        && !deliverForm
-            .financial_account_id
-    ) {
-        return 'اختر الحساب المالي الذي ستدخل إليه دفعة التسليم.';
-    }
-
-    if (
-        amount > 0
-        && isElectronic(
-            deliverForm.payment_method
-        )
-        && !String(
-            deliverForm
-                .bank_or_app_name
-            || ''
-        ).trim()
-    ) {
-        return 'أدخل اسم البنك أو التطبيق لدفعة التسليم.';
-    }
-
-    return '';
-});
-
-const isElectronic = (method) =>
-    [
-        'bank_transfer',
-        'banking_app',
-    ].includes(method);
-
-const repairEnumValue = (value) => {
-    if (
-        value
-        && typeof value === 'object'
-    ) {
-        return value.value
-            ?? value.name
-            ?? '';
-    }
-
-    return String(value ?? '');
-};
-
-const accountsFor = (method) => {
-    const type =
-        method === 'cash'
-            ? 'cash'
-            : method === 'bank_transfer'
-                ? 'bank'
-                : method === 'banking_app'
-                    ? 'banking_app'
-                    : null;
-
-    return type
-        ? props.financialAccounts.filter(
-            (account) =>
-                repairEnumValue(account.type)
-                === type
-        )
-        : props.financialAccounts;
-};
-
-const repairAccountTypeLabel = (type) => ({
-    cash: 'حساب نقدي',
-    bank: 'حساب بنكي',
-    banking_app: 'تطبيق بنكي',
-}[repairEnumValue(type)] || repairEnumValue(type) || 'حساب مالي');
-
-const roundRepairMoney = (value) =>
-    Math.round(
-        (
-            Number(value || 0)
-            + Number.EPSILON
-        ) * 100
-    ) / 100;
-
-const paymentCurrentTotal = computed(() =>
-    roundRepairMoney(
-        props.order.total_amount
-        || 0
-    )
-);
-
-const paymentCurrentPaid = computed(() =>
-    roundRepairMoney(
-        props.order.paid_amount
-        || 0
-    )
-);
-
-const paymentCurrentRemaining = computed(() =>
-    roundRepairMoney(
-        props.order.remaining_amount
-        || 0
-    )
-);
-
-const repairPaymentAmount = computed(() =>
-    roundRepairMoney(
-        paymentForm.amount
-        || 0
-    )
-);
-
-const paymentPaidAfter = computed(() =>
-    roundRepairMoney(
-        paymentCurrentPaid.value
-        + repairPaymentAmount.value
-    )
-);
-
-const paymentRemainingAfter = computed(() =>
-    roundRepairMoney(
-        Math.max(
-            0,
-            paymentCurrentRemaining.value
-            - repairPaymentAmount.value
-        )
-    )
-);
-
-const paymentProgressBefore = computed(() => {
-    if (
-        paymentCurrentTotal.value
-        <= 0
-    ) {
-        return 0;
-    }
-
-    return Math.min(
-        100,
-        Math.max(
-            0,
-            (
-                paymentCurrentPaid.value
-                / paymentCurrentTotal.value
-            ) * 100
-        )
-    );
-});
-
-const paymentProgressAfter = computed(() => {
-    if (
-        paymentCurrentTotal.value
-        <= 0
-    ) {
-        return 0;
-    }
-
-    return Math.min(
-        100,
-        Math.max(
-            0,
-            (
-                paymentPaidAfter.value
-                / paymentCurrentTotal.value
-            ) * 100
-        )
-    );
-});
-
-const repairPaymentStatusAfter = computed(() =>
-    paymentRemainingAfter.value
-    <= 0.00001
-        ? {
-            label: 'مدفوعة بالكامل',
-            class:
-                'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300',
-        }
-        : {
-            label: 'مدفوعة جزئياً',
-            class:
-                'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300',
-        }
-);
-
-const selectedRepairAccount = computed(() =>
-    props.financialAccounts.find(
-        (account) =>
-            Number(account.id)
-            === Number(
-                paymentForm.financial_account_id
-            )
-    ) || null
-);
-
-const selectedRepairPaymentMethodLabel = computed(() =>
-    selectablePaymentMethods.value[
-        paymentForm.payment_method
-    ]
-    || paymentForm.payment_method
-    || '—'
-);
-
-const repairPaymentError = computed(() => {
-    if (
-        repairPaymentAmount.value
-        <= 0
-    ) {
-        return 'أدخل قيمة دفعة أكبر من صفر.';
-    }
-
-    if (
-        repairPaymentAmount.value
-        > paymentCurrentRemaining.value
-    ) {
-        return 'قيمة الدفعة أكبر من المبلغ المتبقي على طلب الصيانة.';
-    }
-
-    if (
-        !paymentForm.payment_method
-    ) {
         return 'اختر طريقة الدفع.';
     }
 
     if (
-        !paymentForm.financial_account_id
+        amount > 0
+        && !compatibleAccounts(
+            deliverForm.payment_method
+        ).length
+    ) {
+        return 'لا يوجد حساب مالي نشط ومتوافق مع طريقة الدفع المختارة.';
+    }
+
+    if (
+        amount > 0
+        && !deliverForm.financial_account_id
     ) {
         return 'اختر الحساب المالي الذي ستدخل إليه الدفعة.';
     }
 
     if (
-        isElectronic(
-            paymentForm.payment_method
-        )
-        && !String(
-            paymentForm.bank_or_app_name
-            || ''
-        ).trim()
+        deliveryRemainingAfterPayment.value > 0.00001
+        && !deliverForm.allow_partial_payment
     ) {
-        return 'أدخل اسم البنك أو التطبيق.';
-    }
-
-    if (
-        !paymentForm.paid_at
-    ) {
-        return 'حدد تاريخ ووقت الدفع.';
+        return 'يوجد مبلغ متبقٍ. أكمل الدفع أو فعّل السماح بالتسليم مع بقاء الدين.';
     }
 
     return '';
 });
 
-const formatCurrency = (value) =>
-    `${Number(value || 0).toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    })} شيكل`;
+watch(
+    () => paymentForm.payment_method,
+    method => {
+        const accounts =
+            compatibleAccounts(method);
 
-const formatPercent = (value) =>
-    `${Number(value || 0).toLocaleString('en-US', {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 1,
-    })}%`;
+        if (
+            !accounts.some(
+                account =>
+                    Number(account.id)
+                    === Number(
+                        paymentForm
+                            .financial_account_id
+                    )
+            )
+        ) {
+            paymentForm.financial_account_id =
+                accounts[0]?.id
+                || '';
+        }
+    },
+    {
+        immediate: true,
+    }
+);
 
-const formatDate = (date) => {
-    if (!date) return '-';
-    return new Date(date).toLocaleDateString('ar-EG');
-};
+watch(
+    () => purchaseForm.supplier_id,
+    () => {
+        if (!selectedPurchaseSupplier.value) return;
 
-const formatDateTime = (date) => {
-    if (!date) return '-';
-    return new Date(date).toLocaleString('ar-EG');
-};
+        purchaseForm.purchase_from =
+            selectedPurchaseSupplier.value.company_name
+            || selectedPurchaseSupplier.value.name
+            || purchaseForm.purchase_from
+            || '';
 
-const openInspectionModal = () => {
-    modals.value.inspection.show = true;
-};
-
-const submitInspection = () => {
-    inspectionForm.post(route('repairs.inspection', props.order.id), {
-        preserveScroll: true,
-        onSuccess: () => {
-            modals.value.inspection.show = false;
-        },
-    });
-};
-
-const openPartModal = () => {
-    modals.value.part.show = true;
-};
-
-const submitPart = () => {
-    partForm.post(route('repairs.add-part', props.order.id), {
-        preserveScroll: true,
-        onSuccess: () => {
-            modals.value.part.show = false;
-            partForm.reset();
-        },
-    });
-};
-
-const removePart = (partId) => {
-    confirmation.value = {
-        action: 'remove-part',
-        partId,
-        title: 'إزالة قطعة غير معتمدة',
-        message: 'سيتم حذف القطعة من طلب الصيانة دون التأثير على المخزون.',
-        processing: false,
-    };
-};
-
-const commitParts = () => {
-    confirmation.value = {
-        action: 'commit-parts',
-        partId: null,
-        title: 'اعتماد قطع الغيار',
-        message: 'سيتم خصم جميع القطع غير المعتمدة من مخزون الصيانة. لا يمكن تكرار العملية.',
-        processing: false,
-    };
-};
-
-const openReadyModal = () => {
-    modals.value.ready.show = true;
-};
-
-const submitReady = () => {
-    readyForm.post(route('repairs.mark-ready', props.order.id), {
-        preserveScroll: true,
-        onSuccess: () => {
-            modals.value.ready.show = false;
-        },
-    });
-};
-
-const selectRepairPaymentMethod = (method) => {
-    paymentForm.payment_method =
-        method;
-
-    const compatible =
-        accountsFor(method);
-
-    const selectedStillValid =
-        compatible.some(
-            (account) =>
-                Number(account.id)
-                === Number(
-                    paymentForm.financial_account_id
-                )
-        );
-
-    if (!selectedStillValid) {
-        paymentForm.financial_account_id =
-            compatible[0]?.id
+        purchaseForm.supplier_phone =
+            selectedPurchaseSupplier.value.phone
+            || purchaseForm.supplier_phone
             || '';
     }
+);
 
-    if (
-        method === 'cash'
-    ) {
-        paymentForm.bank_or_app_name =
-            '';
-        paymentForm.transaction_reference =
-            '';
-    } else if (
-        selectedRepairAccount.value
-    ) {
-        paymentForm.bank_or_app_name =
-            selectedRepairAccount.value.name;
+watch(
+    () => paymentForm.financial_account_id,
+    () => {
+        if (
+            ['bank_transfer', 'banking_app'].includes(paymentForm.payment_method)
+            && selectedPaymentAccount.value
+        ) {
+            paymentForm.bank_or_app_name =
+                selectedPaymentAccount.value.name;
+        } else {
+            paymentForm.bank_or_app_name = '';
+        }
     }
-};
+);
 
-const setRepairQuickPayment = (type) => {
-    const remaining =
-        paymentCurrentRemaining.value;
+watch(
+    () => deliverForm.payment_method,
+    method => {
+        const accounts =
+            compatibleAccounts(method);
 
-    if (
-        remaining <= 0
-    ) {
-        paymentForm.amount = 0;
-        return;
+        if (
+            !accounts.some(
+                account =>
+                    Number(account.id)
+                    === Number(
+                        deliverForm
+                            .financial_account_id
+                    )
+            )
+        ) {
+            deliverForm.financial_account_id =
+                accounts[0]?.id
+                || '';
+        }
+    },
+    {
+        immediate: true,
     }
+);
 
-    if (
-        type === 'quarter'
-    ) {
-        paymentForm.amount =
-            roundRepairMoney(
-                remaining * 0.25
+watch(
+    () => deliverForm.financial_account_id,
+    () => {
+        if (
+            ['bank_transfer', 'banking_app']
+                .includes(
+                    deliverForm.payment_method
+                )
+            && selectedDeliveryAccount.value
+        ) {
+            deliverForm.bank_or_app_name =
+                selectedDeliveryAccount.value
+                    .name;
+        } else {
+            deliverForm.bank_or_app_name =
+                '';
+        }
+    }
+);
+
+watch(
+    () => stockForm.product_id,
+    id => {
+        const product =
+            props.products.find(
+                item =>
+                    Number(item.id)
+                    === Number(id)
             );
-        return;
+
+        if (product) {
+            stockForm.unit_price =
+                Number(
+                    product.selling_price
+                    || 0
+                );
+        }
+    }
+);
+
+const selectedStock = computed(() => props.products.find(p => Number(p.id) === Number(stockForm.product_id)) || null);
+
+const filteredPartProducts = computed(() => {
+    const query = String(partProductSearch.value || '')
+        .trim()
+        .toLowerCase();
+
+    return props.products.filter(product => {
+        if (!query) return true;
+
+        return [
+            product.name,
+            product.code,
+            product.barcode,
+            product.brand,
+            product.model,
+        ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+            .includes(query);
+    });
+});
+
+const stockPartCustomerTotal = computed(() =>
+    Number(stockForm.quantity || 0)
+    * Number(stockForm.unit_price || 0)
+);
+
+const externalPartCustomerTotal = computed(() =>
+    Number(externalForm.quantity || 0)
+    * Number(externalForm.customer_unit_price || 0)
+);
+
+const selectedPaymentAccount = computed(() =>
+    props.financialAccounts.find(
+        account =>
+            Number(account.id)
+            === Number(paymentForm.financial_account_id)
+    ) || null
+);
+
+const paymentRemainingAfter = computed(() =>
+    Math.max(
+        0,
+        Number(props.order.remaining_amount || 0)
+        - Number(paymentForm.amount || 0)
+    )
+);
+
+const paymentAccountBalanceAfter = computed(() =>
+    Number(selectedPaymentAccount.value?.current_balance || 0)
+    + Number(paymentForm.amount || 0)
+);
+
+const selectedPurchaseSupplier = computed(() =>
+    props.suppliers.find(
+        supplier =>
+            Number(supplier.id)
+            === Number(purchaseForm.supplier_id)
+    ) || null
+);
+
+const selectedPurchaseAccount = computed(() =>
+    props.financialAccounts.find(
+        account =>
+            Number(account.id)
+            === Number(purchaseForm.financial_account_id)
+    ) || null
+);
+
+const purchaseQuantity = computed(() =>
+    Number(purchaseTarget.value?.quantity || 0)
+);
+
+const purchaseTotalCost = computed(() =>
+    Math.max(
+        0,
+        purchaseQuantity.value
+        * Number(purchaseForm.unit_purchase_price || 0)
+    )
+);
+
+const purchaseCustomerTotal = computed(() =>
+    Math.max(
+        0,
+        purchaseQuantity.value
+        * Number(purchaseForm.customer_unit_price || 0)
+    )
+);
+
+const purchaseAccountBalanceAfter = computed(() =>
+    Number(selectedPurchaseAccount.value?.current_balance || 0)
+    - purchaseTotalCost.value
+);
+
+const purchaseClientError = computed(() => {
+    if (!purchaseTarget.value) return '';
+
+    if (
+        !purchaseForm.supplier_id
+        && !String(purchaseForm.purchase_from || '').trim()
+    ) {
+        return 'اختر مورداً مسجلاً أو اكتب اسم المحل الذي اشتريت منه القطعة.';
+    }
+
+    if (Number(purchaseForm.unit_purchase_price || 0) <= 0) {
+        return 'أدخل سعر شراء الوحدة بشكل صحيح.';
+    }
+
+    if (!purchaseForm.financial_account_id) {
+        return 'اختر الحساب المالي الذي تم الدفع منه.';
+    }
+
+    if (!purchaseForm.purchased_at) {
+        return 'حدد تاريخ ووقت شراء القطعة.';
     }
 
     if (
-        type === 'half'
+        selectedPurchaseAccount.value
+        && purchaseAccountBalanceAfter.value < -0.00001
     ) {
-        paymentForm.amount =
-            roundRepairMoney(
-                remaining * 0.50
-            );
-        return;
+        return 'رصيد الحساب المالي غير كافٍ لتسجيل شراء هذه القطعة.';
     }
 
-    paymentForm.amount =
-        remaining;
-};
+    return '';
+});
 
-const openPaymentModal = () => {
-    paymentForm.reset();
-    paymentForm.clearErrors();
+const paymentClientError = computed(() => {
+    const amount = Number(paymentForm.amount || 0);
+    const remaining = Number(props.order.remaining_amount || 0);
 
-    paymentForm.amount =
-        paymentCurrentRemaining.value;
-
-    paymentForm.payment_method =
-        'cash';
-
-    paymentForm.paid_at =
-        nowLocal();
-
-    paymentForm.financial_account_id =
-        accountsFor('cash')[0]?.id
-        || '';
-
-    paymentForm.bank_or_app_name =
-        '';
-
-    paymentForm.transaction_reference =
-        '';
-
-    paymentForm.notes =
-        '';
-
-    modals.value.payment.show =
-        true;
-};
-
-const closePaymentModal = () => {
-    modals.value.payment.show =
-        false;
-
-    paymentForm.reset();
-    paymentForm.clearErrors();
-};
-
-const submitPayment = () => {
-    if (repairPaymentError.value) {
-        return;
+    if (amount <= 0) {
+        return 'أدخل مبلغ دفعة أكبر من صفر.';
     }
 
-    paymentForm.post(
-        route(
-            'repairs.add-payment',
-            props.order.id
-        ),
+    if (amount > remaining + 0.00001) {
+        return 'المبلغ المدفوع أكبر من المبلغ المتبقي على الطلب.';
+    }
+
+    if (!paymentForm.payment_method) {
+        return 'اختر طريقة الدفع.';
+    }
+
+    if (!compatibleAccounts(paymentForm.payment_method).length) {
+        return 'لا يوجد حساب مالي نشط ومتوافق مع طريقة الدفع المختارة.';
+    }
+
+    if (!paymentForm.financial_account_id) {
+        return 'اختر الحساب المالي الذي ستدخل إليه الدفعة.';
+    }
+
+    return '';
+});
+
+const orderCost = computed(() => Number(props.order.parts_cost || 0));
+const orderProfit = computed(() => Number(props.order.total_amount || 0) - orderCost.value);
+
+const saveDetails = () => detailsForm.patch(route('repairs.update-details', props.order.id), { preserveScroll: true, onSuccess: () => { detailsOpen.value = false; } });
+
+const openPartModal = () => {
+    stockForm.clearErrors();
+    externalForm.clearErrors();
+
+    partSource.value = 'stock';
+    partProductSearch.value = '';
+
+    stockForm.reset();
+    stockForm.quantity = 1;
+
+    externalForm.reset();
+    externalForm.quantity = 1;
+
+    partModal.value = true;
+};
+
+const addStock = () =>
+    stockForm.post(
+        route('repairs.parts.stock', props.order.id),
         {
             preserveScroll: true,
-
             onSuccess: () => {
-                closePaymentModal();
+                stockForm.reset();
+                stockForm.quantity = 1;
+                partProductSearch.value = '';
+                partModal.value = false;
+            },
+        }
+    );
+
+const addExternal = () =>
+    externalForm.post(
+        route('repairs.parts.external', props.order.id),
+        {
+            preserveScroll: true,
+            onSuccess: () => {
+                externalForm.reset();
+                externalForm.quantity = 1;
+                partModal.value = false;
+            },
+        }
+    );
+
+const openPurchase = part => {
+    purchaseTarget.value = part;
+    purchaseForm.reset();
+    purchaseForm.clearErrors();
+    purchaseForm.purchased_at = nowLocal();
+    purchaseForm.supplier_id = part.supplier_id || '';
+    purchaseForm.purchase_from = part.purchase_from || '';
+    purchaseForm.supplier_phone = part.supplier_phone || '';
+    purchaseForm.customer_unit_price = Number(part.customer_unit_price || 0) || '';
+    purchaseForm.unit_purchase_price = '';
+    purchaseForm.financial_account_id = '';
+    purchaseForm.purchase_reference = '';
+};
+
+const completePurchase = () => {
+    purchaseForm.clearErrors();
+
+    if (purchaseClientError.value) {
+        purchaseForm.setError('purchase', purchaseClientError.value);
+        return;
+    }
+
+    purchaseForm.post(
+        route('repairs.external-parts.purchase', purchaseTarget.value.id),
+        {
+            preserveScroll: true,
+            onSuccess: () => {
+                purchaseTarget.value = null;
             },
         }
     );
 };
+const deleteExternalDraft = part => externalForm.delete(route('repairs.external-parts.destroy', part.id), { preserveScroll: true });
+const openReturnExternal = part => { returnExternalTarget.value = part; returnExternalForm.reset(); };
+const returnExternal = () => returnExternalForm.post(route('repairs.external-parts.return', returnExternalTarget.value.id), { preserveScroll: true, onSuccess: () => { returnExternalTarget.value = null; } });
+const openRevertStock = part => { revertStockTarget.value = part; revertStockForm.reset(); };
+const revertStock = () => revertStockForm.post(route('repairs.parts.stock-revert', revertStockTarget.value.id), { preserveScroll: true, onSuccess: () => { revertStockTarget.value = null; } });
+const markReady = () => readyForm.post(route('repairs.mark-ready', props.order.id), { preserveScroll: true });
+const openPaymentModal = () => {
+    paymentForm.clearErrors();
+    paymentForm.amount = Number(props.order.remaining_amount || 0);
+    paymentForm.paid_at = nowLocal();
+    paymentForm.transaction_reference = '';
+    paymentForm.notes = '';
 
+    const accounts = compatibleAccounts(paymentForm.payment_method);
+
+    if (
+        !accounts.some(
+            account =>
+                Number(account.id)
+                === Number(paymentForm.financial_account_id)
+        )
+    ) {
+        paymentForm.financial_account_id = accounts[0]?.id || '';
+    }
+
+    paymentModal.value = true;
+};
+
+const setPaymentAmount = mode => {
+    const remaining = Number(props.order.remaining_amount || 0);
+
+    if (mode === 'half') {
+        paymentForm.amount = Number((remaining / 2).toFixed(2));
+        return;
+    }
+
+    paymentForm.amount = remaining;
+};
+
+const addPayment = () => {
+    paymentForm.clearErrors();
+
+    if (paymentClientError.value) {
+        paymentForm.setError('payment', paymentClientError.value);
+        return;
+    }
+
+    paymentForm.post(
+        route('repairs.add-payment', props.order.id),
+        {
+            preserveScroll: true,
+            onSuccess: () => {
+                paymentModal.value = false;
+            },
+        }
+    );
+};
 const openDeliverModal = () => {
-    deliverForm.reset();
+    deliverForm.clearErrors();
 
     deliverForm.payment_amount =
         Number(
@@ -1894,28 +664,47 @@ const openDeliverModal = () => {
             || 0
         );
 
-    deliverForm.payment_method =
-        'cash';
-
-    deliverForm.financial_account_id =
-        accountsFor('cash')[0]?.id
-        || '';
-
-    deliverForm.bank_or_app_name =
-        '';
-
-    deliverForm.transaction_reference =
-        '';
-
     deliverForm.allow_partial_payment =
         false;
 
-    modals.value.deliver.show =
+    deliverForm.paid_at =
+        nowLocal();
+
+    const accounts =
+        compatibleAccounts(
+            deliverForm.payment_method
+        );
+
+    if (
+        !accounts.some(
+            account =>
+                Number(account.id)
+                === Number(
+                    deliverForm
+                        .financial_account_id
+                )
+        )
+    ) {
+        deliverForm.financial_account_id =
+            accounts[0]?.id
+            || '';
+    }
+
+    deliverModal.value =
         true;
 };
 
-const submitDelivery = () => {
-    if (deliveryPaymentError.value) {
+const deliver = () => {
+    deliverForm.clearErrors();
+
+    if (
+        deliveryClientError.value
+    ) {
+        deliverForm.setError(
+            'delivery',
+            deliveryClientError.value
+        );
+
         return;
     }
 
@@ -1926,135 +715,1825 @@ const submitDelivery = () => {
         ),
         {
             preserveScroll: true,
+
             onSuccess: () => {
-                modals.value.deliver.show =
+                deliverModal.value =
                     false;
             },
         }
     );
 };
+const cancelOrder = () => cancelForm.post(route('repairs.cancel', props.order.id), { preserveScroll: true, onSuccess: () => { cancelModal.value = false; } });
 
-watch(
-    () => deliverForm.payment_method,
-    (method) => {
-        const compatible =
-            accountsFor(
-                method
-            );
-
-        const selectedStillValid =
-            compatible.some(
-                (account) =>
-                    Number(account.id)
-                    === Number(
-                        deliverForm
-                            .financial_account_id
-                    )
-            );
-
-        if (! selectedStillValid) {
-            deliverForm.financial_account_id =
-                compatible[0]?.id
-                || '';
+const money = value => `${Number(value || 0).toLocaleString('ar-PS', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} شيكل`;
+const date = value => value ? new Intl.DateTimeFormat('ar-PS', { dateStyle: 'medium' }).format(new Date(value)) : '—';
+const dateTime = value => value
+    ? new Intl.DateTimeFormat(
+        'ar-PS',
+        {
+            dateStyle: 'medium',
+            timeStyle: 'short',
         }
-
-        if (
-            method === 'cash'
-        ) {
-            deliverForm.bank_or_app_name =
-                '';
-
-            deliverForm.transaction_reference =
-                '';
-        }
-    }
-);
-
-const openCancelModal = () => {
-    cancelForm.reset();
-    modals.value.cancel.show = true;
-};
-
-const submitCancel = () => {
-    cancelForm.post(route('repairs.cancel', props.order.id), {
-        preserveScroll: true,
-        onSuccess: () => { modals.value.cancel.show = false; },
-    });
-};
-
-const openRevertModal = (part) => {
-    selectedPart.value = part;
-    revertForm.reset();
-    modals.value.revert.show = true;
-};
-
-const submitRevert = () => {
-    if (!selectedPart.value) return;
-    revertForm.post(route('repairs.revert-part', selectedPart.value.id), {
-        preserveScroll: true,
-        onSuccess: () => {
-            modals.value.revert.show = false;
-            selectedPart.value = null;
-        },
-    });
-};
-
-const openImage = (attachment) => {
-    selectedAttachment.value = attachment;
-    modals.value.image.show = true;
-};
-
-const closeConfirmation = () => {
-    if (!confirmation.value.processing) confirmation.value = { action: null, partId: null, title: '', message: '', processing: false };
-};
-
-const confirmAction = () => {
-    confirmation.value.processing = true;
-    const options = {
-        preserveScroll: true,
-        onFinish: () => {
-            confirmation.value.processing = false;
-            closeConfirmation();
-        },
-    };
-
-    if (confirmation.value.action === 'remove-part') {
-        router.delete(route('repairs.remove-part', confirmation.value.partId), options);
-    } else if (confirmation.value.action === 'commit-parts') {
-        router.post(route('repairs.commit-parts', props.order.id), {}, options);
-    }
-};
+    ).format(new Date(value))
+    : '—';
 </script>
 
-<style scoped>
-.repair-payment-scroll {
-    scrollbar-width: thin;
-    scrollbar-color: #cbd5e1 transparent;
-    -webkit-overflow-scrolling: touch;
-}
+<template>
+    <Head :title="order.order_number" />
+    <AuthenticatedLayout>
+        <template #header>
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2"><h1 class="text-2xl font-black text-slate-950 dark:text-white">{{ order.order_number }}</h1><span class="rounded-full px-3 py-1 text-xs font-black" :class="statusMeta[1]">{{ statusMeta[0] }}</span><span v-if="order.sub_status === 'waiting_part'" class="rounded-full bg-orange-100 px-3 py-1 text-xs font-black text-orange-700">بانتظار قطعة خارجية</span></div>
+                    <p class="mt-1 text-sm text-slate-500">{{ order.customer_name }} · {{ order.brand }} {{ order.model }} · {{ order.customer_phone }}</p>
+                </div>
+                <div class="flex flex-wrap gap-2"><a :href="`tel:${order.customer_phone}`" class="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white">اتصال بالعميل</a><Link :href="route('repairs.print', order.id)" class="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-black text-slate-600 dark:border-slate-700 dark:text-slate-300">طباعة</Link><Link :href="route('repairs.index')" class="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-black text-slate-600 dark:border-slate-700 dark:text-slate-300">رجوع</Link></div>
+            </div>
+        </template>
 
-.repair-payment-scroll::-webkit-scrollbar {
-    width: 6px;
-}
+        <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_350px]">
+            <div class="space-y-5">
+                <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                    <div class="border-b border-slate-100 bg-gradient-to-l from-blue-50/80 to-white px-5 py-5 dark:border-slate-800 dark:from-blue-950/20 dark:to-slate-900 sm:px-6">
+                        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div class="flex items-center gap-3">
+                                <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-lg text-white shadow-lg shadow-blue-600/20">
+                                    📱
+                                </div>
 
-.repair-payment-scroll::-webkit-scrollbar-track {
-    background: transparent;
-}
+                                <div>
+                                    <h2 class="text-base font-black text-slate-950 dark:text-white">
+                                        بيانات الجهاز عند الاستلام
+                                    </h2>
 
-.repair-payment-scroll::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 9999px;
-}
+                                    <p class="mt-1 text-xs text-slate-500">
+                                        تفاصيل الجهاز وحالته والملحقات والصور المسجلة عند الاستلام.
+                                    </p>
+                                </div>
+                            </div>
 
-.repair-payment-scroll::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
-}
+                            <button
+                                v-if="isEditable"
+                                type="button"
+                                class="rounded-xl border border-blue-200 bg-white px-3.5 py-2 text-xs font-black text-blue-700 shadow-sm transition hover:bg-blue-50 dark:border-blue-900/50 dark:bg-slate-900 dark:text-blue-300"
+                                @click="detailsOpen = true"
+                            >
+                                تعديل التشخيص والسعر
+                            </button>
+                        </div>
+                    </div>
 
-:global(.dark) .repair-payment-scroll {
-    scrollbar-color: #475569 transparent;
-}
+                    <div class="space-y-6 p-5 sm:p-6">
+                        <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <div class="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/60">
+                                <p class="text-[10px] font-black text-slate-400">نوع الجهاز</p>
+                                <strong class="mt-1.5 block text-sm text-slate-950 dark:text-white">
+                                    {{ order.device_type || '—' }}
+                                </strong>
+                            </div>
 
-:global(.dark) .repair-payment-scroll::-webkit-scrollbar-thumb {
-    background: #475569;
-}
-</style>
+                            <div class="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/60">
+                                <p class="text-[10px] font-black text-slate-400">الماركة / الموديل</p>
+                                <strong class="mt-1.5 block text-sm text-slate-950 dark:text-white">
+                                    {{ order.brand || '—' }} {{ order.model || '' }}
+                                </strong>
+                            </div>
+
+                            <div class="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/60">
+                                <p class="text-[10px] font-black text-slate-400">اللون</p>
+                                <strong class="mt-1.5 block text-sm text-slate-950 dark:text-white">
+                                    {{ order.color || '—' }}
+                                </strong>
+                            </div>
+
+                            <div class="rounded-2xl border border-violet-100 bg-violet-50 p-4 dark:border-violet-900/40 dark:bg-violet-950/20">
+                                <p class="text-[10px] font-black text-violet-500">السعر المتفق</p>
+                                <strong class="mt-1.5 block text-sm text-violet-800 dark:text-violet-200">
+                                    {{ money(order.agreed_price ?? order.total_amount) }}
+                                </strong>
+                            </div>
+                        </div>
+
+                        <div class="grid gap-4 lg:grid-cols-2">
+                            <article class="rounded-2xl border border-amber-100 bg-amber-50/60 p-4 dark:border-amber-900/40 dark:bg-amber-950/15">
+                                <div class="mb-2 flex items-center gap-2">
+                                    <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100 text-sm dark:bg-amber-950/40">🛡️</span>
+                                    <div>
+                                        <p class="text-xs font-black text-amber-900 dark:text-amber-200">الحالة الخارجية عند الاستلام</p>
+                                        <p class="mt-0.5 text-[10px] text-amber-700/70 dark:text-amber-300/70">توثيق حالة الجهاز قبل الصيانة</p>
+                                    </div>
+                                </div>
+
+                                <p class="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-200">
+                                    {{ order.device_condition || 'لم يتم تسجيل ملاحظات على الحالة الخارجية.' }}
+                                </p>
+                            </article>
+
+                            <article class="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 dark:border-emerald-900/40 dark:bg-emerald-950/15">
+                                <div class="mb-2 flex items-center gap-2">
+                                    <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-sm dark:bg-emerald-950/40">🎒</span>
+                                    <div>
+                                        <p class="text-xs font-black text-emerald-900 dark:text-emerald-200">الملحقات المستلمة</p>
+                                        <p class="mt-0.5 text-[10px] text-emerald-700/70 dark:text-emerald-300/70">كل ما استلمه المحل مع الجهاز</p>
+                                    </div>
+                                </div>
+
+                                <p class="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-200">
+                                    {{ order.received_accessories || 'لم يتم تسجيل ملحقات.' }}
+                                </p>
+                            </article>
+                        </div>
+
+                        <div class="grid gap-4 lg:grid-cols-[.8fr_1.2fr]">
+                            <article class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                                <div class="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p class="text-xs font-black text-slate-700 dark:text-slate-200">رمز قفل الجهاز</p>
+                                        <p class="mt-1 text-[10px] leading-5 text-slate-400">
+                                            {{ status === 'delivered' && !lockCode ? 'يتم مسح رمز القفل تلقائياً عند التسليم.' : 'يظهر فقط داخل تفاصيل طلب الصيانة.' }}
+                                        </p>
+                                    </div>
+
+                                    <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-200 text-sm dark:bg-slate-700">🔐</span>
+                                </div>
+
+                                <div
+                                    v-if="lockCode"
+                                    class="mt-4 flex items-center gap-2"
+                                >
+                                    <div
+                                        dir="ltr"
+                                        class="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-3 text-center font-mono text-base font-black tracking-wider text-slate-950 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                                    >
+                                        {{ lockCodeVisible ? lockCode : '••••••••' }}
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        class="rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs font-black text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                                        @click="lockCodeVisible = !lockCodeVisible"
+                                    >
+                                        {{ lockCodeVisible ? 'إخفاء' : 'إظهار' }}
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        class="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-xs font-black text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300"
+                                        @click="copyLockCode"
+                                    >
+                                        {{ lockCodeCopied ? 'تم النسخ' : 'نسخ' }}
+                                    </button>
+                                </div>
+
+                                <div
+                                    v-else
+                                    class="mt-4 rounded-xl border border-dashed border-slate-300 px-3 py-4 text-center text-xs font-bold text-slate-400 dark:border-slate-700"
+                                >
+                                    {{ status === 'delivered' ? 'لا يوجد رمز محفوظ بعد التسليم.' : 'لم يتم تسجيل رمز قفل.' }}
+                                </div>
+                            </article>
+
+                            <article class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+                                <div class="flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                        <p class="text-xs font-black text-slate-700 dark:text-slate-200">مواعيد الطلب</p>
+                                        <p class="mt-1 text-[10px] text-slate-400">الاستلام والموعد المتوقع والإنجاز</p>
+                                    </div>
+                                </div>
+
+                                <div class="mt-4 grid gap-2 sm:grid-cols-3">
+                                    <div class="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
+                                        <p class="text-[10px] text-slate-400">استلام الجهاز</p>
+                                        <strong class="mt-1 block text-xs text-slate-800 dark:text-slate-200">
+                                            {{ dateTime(order.received_at) }}
+                                        </strong>
+                                    </div>
+
+                                    <div class="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
+                                        <p class="text-[10px] text-slate-400">متوقع الجاهزية</p>
+                                        <strong class="mt-1 block text-xs text-slate-800 dark:text-slate-200">
+                                            {{ date(order.expected_delivery_date) }}
+                                        </strong>
+                                    </div>
+
+                                    <div class="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
+                                        <p class="text-[10px] text-slate-400">التسليم</p>
+                                        <strong class="mt-1 block text-xs text-slate-800 dark:text-slate-200">
+                                            {{ dateTime(order.delivered_at) }}
+                                        </strong>
+                                    </div>
+                                </div>
+                            </article>
+                        </div>
+
+                        <article class="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-700 dark:bg-slate-800/30">
+                            <div class="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                    <p class="text-xs font-black text-slate-700 dark:text-slate-200">صور الجهاز عند الاستلام</p>
+                                    <p class="mt-1 text-[10px] text-slate-400">
+                                        {{ receivedAttachments.length ? `${receivedAttachments.length} صورة مرفقة` : 'لا توجد صور مرفقة لهذا الطلب' }}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div
+                                v-if="receivedAttachments.length"
+                                class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"
+                            >
+                                <button
+                                    v-for="attachment in receivedAttachments"
+                                    :key="attachment.id"
+                                    type="button"
+                                    class="group relative aspect-[4/3] overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-700 dark:bg-slate-800"
+                                    @click="intakeImageModal = attachment"
+                                >
+                                    <img
+                                        :src="attachmentUrl(attachment)"
+                                        alt="صورة الجهاز عند الاستلام"
+                                        class="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                                    />
+
+                                    <span class="absolute inset-x-2 bottom-2 rounded-lg bg-slate-950/70 px-2 py-1.5 text-[10px] font-black text-white opacity-0 backdrop-blur transition group-hover:opacity-100">
+                                        فتح الصورة
+                                    </span>
+                                </button>
+                            </div>
+
+                            <div
+                                v-else
+                                class="mt-4 rounded-2xl border-2 border-dashed border-slate-200 px-5 py-7 text-center text-xs text-slate-400 dark:border-slate-700"
+                            >
+                                لم يتم إرفاق صور للجهاز عند إنشاء الطلب.
+                            </div>
+                        </article>
+
+                        <div class="border-t border-slate-100 pt-5 dark:border-slate-800">
+                            <div class="mb-4 flex items-center justify-between gap-3">
+                                <div>
+                                    <h3 class="text-sm font-black text-slate-950 dark:text-white">المشكلة والتشخيص والإصلاح</h3>
+                                    <p class="mt-1 text-xs text-slate-500">التفاصيل الفنية الرئيسية للطلب.</p>
+                                </div>
+                            </div>
+
+                            <div class="grid gap-4 lg:grid-cols-3">
+                                <article class="rounded-2xl bg-rose-50/70 p-4 dark:bg-rose-950/15">
+                                    <p class="text-xs font-black text-rose-700 dark:text-rose-300">المشكلة التي ذكرها العميل</p>
+                                    <p class="mt-2 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-200">
+                                        {{ order.problem_description || '—' }}
+                                    </p>
+                                </article>
+
+                                <article class="rounded-2xl bg-violet-50/70 p-4 dark:bg-violet-950/15">
+                                    <p class="text-xs font-black text-violet-700 dark:text-violet-300">التشخيص</p>
+                                    <p class="mt-2 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-200">
+                                        {{ order.inspection_result || '—' }}
+                                    </p>
+                                </article>
+
+                                <article class="rounded-2xl bg-emerald-50/70 p-4 dark:bg-emerald-950/15">
+                                    <p class="text-xs font-black text-emerald-700 dark:text-emerald-300">الإصلاح المطلوب / المنفذ</p>
+                                    <p class="mt-2 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-200">
+                                        {{ order.repair_action || '—' }}
+                                    </p>
+                                </article>
+                            </div>
+
+                            <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                <div class="rounded-2xl bg-slate-50 p-3 dark:bg-slate-800">
+                                    <p class="text-[10px] text-slate-400">سبب العطل</p>
+                                    <strong class="mt-1 block text-sm text-slate-800 dark:text-slate-200">
+                                        {{ order.fault_cause || '—' }}
+                                    </strong>
+                                </div>
+
+                                <div class="rounded-2xl bg-slate-50 p-3 dark:bg-slate-800">
+                                    <p class="text-[10px] text-slate-400">الفني</p>
+                                    <strong class="mt-1 block text-sm text-slate-800 dark:text-slate-200">
+                                        {{ order.technician_name || '—' }}
+                                    </strong>
+                                </div>
+
+                                <div class="rounded-2xl bg-slate-50 p-3 dark:bg-slate-800 sm:col-span-2">
+                                    <p class="text-[10px] text-slate-400">ملاحظات العميل</p>
+                                    <p class="mt-1 whitespace-pre-line text-sm leading-6 text-slate-700 dark:text-slate-200">
+                                        {{ order.customer_notes || '—' }}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div
+                                v-if="order.internal_notes"
+                                class="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800"
+                            >
+                                <p class="text-[10px] font-black text-slate-400">ملاحظات داخلية</p>
+                                <p class="mt-2 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-200">
+                                    {{ order.internal_notes }}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                    <div class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="font-black text-slate-950 dark:text-white">قطع الغيار</h2><p class="mt-1 text-xs text-slate-500">المخزن والشراء الخارجي ضمن نفس الطلب.</p></div><button v-if="isEditable" type="button" class="rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-black text-white" @click="openPartModal">+ إضافة قطعة</button></div>
+
+                    <div class="mt-5 space-y-4">
+                        <div v-if="committedStockParts.length"><p class="mb-2 text-xs font-black text-blue-600">من مخزن المحل</p><div class="space-y-2"><article v-for="part in committedStockParts" :key="part.id" class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4 dark:border-blue-900/40 dark:bg-blue-950/20"><div><strong class="text-sm dark:text-white">{{ part.product_name }}</strong><p class="mt-1 text-xs text-slate-500">{{ part.quantity }} قطعة · تكلفة {{ money(part.total_cost) }} · {{ part.warehouse?.name }}</p></div><button v-if="isEditable" type="button" class="text-xs font-black text-rose-600" @click="openRevertStock(part)">إرجاع للمخزن</button></article></div></div>
+
+                        <div v-if="externalParts.length"><p class="mb-2 text-xs font-black text-orange-600">قطع خارجية</p><div class="space-y-2"><article v-for="part in externalParts" :key="part.id" class="rounded-2xl border p-4" :class="part.status === 'draft' ? 'border-orange-200 bg-orange-50 dark:border-orange-900/50 dark:bg-orange-950/20' : part.status === 'purchased' ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20' : 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800'"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="flex items-center gap-2"><strong class="text-sm dark:text-white">{{ part.part_name }}</strong><span class="rounded-full px-2 py-1 text-[10px] font-black" :class="part.status === 'draft' ? 'bg-orange-100 text-orange-700' : part.status === 'purchased' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'">{{ part.status === 'draft' ? 'بانتظار الشراء' : part.status === 'purchased' ? 'تم الشراء' : 'تم الإرجاع' }}</span></div><p class="mt-1 text-xs text-slate-500">الكمية {{ part.quantity }}<template v-if="part.status === 'purchased'"> · من {{ part.purchase_from }} · تكلفة {{ money(part.total_purchase_cost) }} · {{ part.financial_account?.name }}</template></p></div><div v-if="part.status === 'draft' && isEditable" class="flex gap-2"><button type="button" class="rounded-lg bg-orange-600 px-3 py-2 text-xs font-black text-white" @click="openPurchase(part)">تسجيل الشراء</button><button type="button" class="rounded-lg px-3 py-2 text-xs font-black text-rose-600" @click="deleteExternalDraft(part)">حذف</button></div><button v-if="part.status === 'purchased' && !isFinished" type="button" class="text-xs font-black text-rose-600" @click="openReturnExternal(part)">إرجاع للمصدر</button></div></article></div></div>
+
+                        <div v-if="legacyPendingStockParts.length" class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">يوجد {{ legacyPendingStockParts.length }} قطعة قديمة غير معتمدة من النظام السابق. راجعها قبل تحديد الجهاز كجاهز.</div>
+                        <div v-if="!committedStockParts.length && !externalParts.length && !legacyPendingStockParts.length" class="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">لا يحتاج هذا الطلب قطع غيار حتى الآن.</div>
+                    </div>
+                </section>
+
+                <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                    <div class="flex items-center justify-between"><div><h2 class="font-black text-slate-950 dark:text-white">دفعات العميل</h2><p class="mt-1 text-xs text-slate-500">الدفع غالباً عند الاستلام، ويمكن تسجيل عربون عند الحاجة.</p></div><button v-if="order.can_add_payment" type="button" class="rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-black text-white" @click="openPaymentModal">+ تسجيل دفعة</button></div>
+                    <div v-if="order.payments?.length" class="mt-4 overflow-x-auto"><table class="min-w-full text-sm"><thead class="text-xs text-slate-400"><tr><th class="py-2 text-right">التاريخ</th><th class="py-2 text-right">الطريقة</th><th class="py-2 text-right">الحساب</th><th class="py-2 text-left">المبلغ</th></tr></thead><tbody><tr v-for="payment in order.payments" :key="payment.id" class="border-t border-slate-100 dark:border-slate-800"><td class="py-3">{{ date(payment.paid_at) }}</td><td>{{ paymentMethods[payment.payment_method] || payment.payment_method }}</td><td>{{ payment.financial_account?.name || '—' }}</td><td dir="ltr" class="text-left font-black text-emerald-600">{{ money(payment.amount) }}</td></tr></tbody></table></div><p v-else class="mt-4 text-sm text-slate-500">لم يتم تسجيل أي دفعة بعد.</p>
+                </section>
+            </div>
+
+            <aside class="space-y-4 xl:sticky xl:top-6 xl:self-start">
+                <section class="rounded-3xl bg-slate-950 p-5 text-white shadow-xl"><p class="text-[10px] font-black tracking-widest text-blue-300">FINANCIAL SUMMARY</p><div class="mt-4 rounded-2xl bg-white/5 p-4"><p class="text-xs text-slate-400">على العميل</p><strong dir="ltr" class="mt-1 block text-right text-3xl font-black">{{ money(order.total_amount) }}</strong></div><div class="mt-4 grid grid-cols-2 gap-2"><div class="rounded-xl bg-emerald-500/10 p-3"><p class="text-[10px] text-emerald-300">المدفوع</p><strong class="mt-1 block text-sm text-emerald-200">{{ money(order.paid_amount) }}</strong></div><div class="rounded-xl bg-rose-500/10 p-3"><p class="text-[10px] text-rose-300">المتبقي</p><strong class="mt-1 block text-sm text-rose-200">{{ money(order.remaining_amount) }}</strong></div></div><div class="mt-4 flex justify-between border-t border-white/10 pt-4 text-sm"><span class="text-slate-400">تكلفة القطع الفعلية</span><strong>{{ money(order.parts_cost) }}</strong></div><div class="mt-2 flex justify-between text-sm"><span class="text-slate-400">ربح الطلب</span><strong :class="orderProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'">{{ money(orderProfit) }}</strong></div></section>
+
+                <section v-if="status === 'in_progress'" class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"><h2 class="font-black dark:text-white">إنهاء الصيانة</h2><p v-if="pendingExternal.length" class="mt-3 rounded-xl bg-orange-50 p-3 text-xs leading-5 text-orange-700">ما زال لديك {{ pendingExternal.length }} قطعة خارجية بانتظار الشراء. لا يمكن تجهيز الجهاز قبل حسمها.</p><button type="button" :disabled="!order.can_be_marked_ready" class="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40" @click="markReady">✓ الجهاز جاهز — اتصل بالعميل</button></section>
+
+                <section v-if="isReady" class="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 dark:border-emerald-900/50 dark:bg-emerald-950/20"><h2 class="font-black text-emerald-900 dark:text-emerald-200">الجهاز جاهز للاستلام</h2><p class="mt-2 text-xs text-emerald-700 dark:text-emerald-300">اتصل بالعميل، وعندما يصل سجّل الدفعة ثم سلّم الجهاز.</p><a :href="`tel:${order.customer_phone}`" class="mt-4 block rounded-xl border border-emerald-300 px-4 py-3 text-center text-sm font-black text-emerald-700">اتصال: {{ order.customer_phone }}</a><button type="button" class="mt-2 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white" @click="openDeliverModal">دفع وتسليم الجهاز</button></section>
+
+                <section v-if="!isFinished" class="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900"><button type="button" class="w-full rounded-xl border border-rose-200 px-4 py-3 text-xs font-black text-rose-600" @click="cancelModal = true">إلغاء طلب الصيانة</button><p v-if="purchasedExternal.length" class="mt-2 text-[10px] leading-5 text-slate-400">إلغاء الطلب لا يعيد تلقائياً قيمة القطع الخارجية المشتراة. إذا رجعتها للمحل الخارجي، سجّل «إرجاع للمصدر» أولاً.</p></section>
+            </aside>
+        </div>
+
+        <!-- Details modal -->
+        <div v-if="detailsOpen" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4" @mousedown.self="detailsOpen = false"><form class="w-full max-w-2xl rounded-3xl bg-white p-6 dark:bg-slate-900" @submit.prevent="saveDetails"><h2 class="text-lg font-black dark:text-white">تعديل التشخيص والسعر</h2><div class="mt-5 grid gap-4 md:grid-cols-2"><textarea v-model="detailsForm.inspection_result" rows="4" class="rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="التشخيص"/><textarea v-model="detailsForm.repair_action" rows="4" class="rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="الإصلاح المطلوب"/><input v-model.number="detailsForm.agreed_price" type="number" min="0" step="0.01" class="rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="السعر المتفق"/><input v-model="detailsForm.expected_delivery_date" type="date" class="rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white"/><input v-model="detailsForm.technician_name" class="rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="الفني"/><input v-model="detailsForm.fault_cause" class="rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="سبب العطل"/></div><div class="mt-5 grid grid-cols-2 gap-2"><button type="button" class="rounded-xl border border-slate-300 py-3 font-black" @click="detailsOpen = false">إلغاء</button><button class="rounded-xl bg-blue-600 py-3 font-black text-white">حفظ</button></div></form></div>
+
+        <!-- Add part modal -->
+        <div
+            v-if="partModal"
+            class="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/75 p-3 backdrop-blur-sm sm:p-5"
+            @mousedown.self="!stockForm.processing && !externalForm.processing && (partModal = false)"
+        >
+            <div
+                class="flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl dark:bg-slate-900"
+            >
+                <div
+                    class="shrink-0 border-b border-slate-200 bg-gradient-to-l from-blue-50 via-white to-violet-50 px-5 py-5 dark:border-slate-800 dark:from-blue-950/20 dark:via-slate-900 dark:to-violet-950/20 sm:px-6"
+                >
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="flex items-start gap-3">
+                            <div
+                                class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-xl text-white shadow-lg shadow-blue-600/20"
+                            >
+                                🔧
+                            </div>
+
+                            <div>
+                                <h2
+                                    class="text-xl font-black text-slate-950 dark:text-white"
+                                >
+                                    إضافة قطعة غيار
+                                </h2>
+
+                                <p
+                                    class="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400"
+                                >
+                                    حدد مصدر القطعة، ثم أدخل البيانات المطلوبة بشكل واضح وسريع.
+                                </p>
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            :disabled="stockForm.processing || externalForm.processing"
+                            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl text-slate-400 transition hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:hover:text-white"
+                            @click="partModal = false"
+                        >
+                            ×
+                        </button>
+                    </div>
+
+                    <div
+                        class="mt-5 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5 dark:bg-slate-800"
+                    >
+                        <button
+                            type="button"
+                            class="flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition"
+                            :class="
+                                partSource === 'stock'
+                                    ? 'bg-white text-blue-700 shadow-sm ring-1 ring-slate-200 dark:bg-slate-700 dark:text-blue-300 dark:ring-slate-600'
+                                    : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
+                            "
+                            @click="partSource = 'stock'"
+                        >
+                            <span>📦</span>
+                            من مخزن المحل
+                        </button>
+
+                        <button
+                            type="button"
+                            class="flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition"
+                            :class="
+                                partSource === 'external'
+                                    ? 'bg-white text-violet-700 shadow-sm ring-1 ring-slate-200 dark:bg-slate-700 dark:text-violet-300 dark:ring-slate-600'
+                                    : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
+                            "
+                            @click="partSource = 'external'"
+                        >
+                            <span>🛍️</span>
+                            شراء من خارج المحل
+                        </button>
+                    </div>
+                </div>
+
+                <div
+                    class="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6"
+                >
+                    <form
+                        v-if="partSource === 'stock'"
+                        class="space-y-5"
+                        @submit.prevent="addStock"
+                    >
+                        <div
+                            v-if="Object.keys(stockForm.errors).length"
+                            class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300"
+                        >
+                            {{ Object.values(stockForm.errors)[0] }}
+                        </div>
+
+                        <div>
+                            <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                                البحث عن القطعة
+                            </label>
+
+                            <input
+                                v-model.trim="partProductSearch"
+                                type="search"
+                                class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                                placeholder="اكتب اسم القطعة أو الكود..."
+                            />
+                        </div>
+
+                        <div>
+                            <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                                قطعة المخزون
+                                <span class="text-rose-500">*</span>
+                            </label>
+
+                            <select
+                                v-model="stockForm.product_id"
+                                class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                            >
+                                <option value="">اختر القطعة</option>
+
+                                <option
+                                    v-for="product in filteredPartProducts"
+                                    :key="product.id"
+                                    :value="product.id"
+                                    :disabled="Number(product.available_quantity || 0) <= 0"
+                                >
+                                    {{ product.name }} — متوفر {{ product.available_quantity }}
+                                </option>
+                            </select>
+                        </div>
+
+                        <div
+                            v-if="selectedStock"
+                            class="grid gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4 sm:grid-cols-3 dark:border-blue-900/50 dark:bg-blue-950/20"
+                        >
+                            <div>
+                                <p class="text-[10px] font-black uppercase tracking-wider text-blue-500">
+                                    المتوفر
+                                </p>
+
+                                <strong class="mt-1 block text-lg text-blue-900 dark:text-blue-200">
+                                    {{ selectedStock.available_quantity }}
+                                </strong>
+                            </div>
+
+                            <div>
+                                <p class="text-[10px] font-black uppercase tracking-wider text-blue-500">
+                                    تكلفة المخزون
+                                </p>
+
+                                <strong class="mt-1 block text-sm text-blue-900 dark:text-blue-200">
+                                    {{ money(selectedStock.purchase_price) }}
+                                </strong>
+                            </div>
+
+                            <div>
+                                <p class="text-[10px] font-black uppercase tracking-wider text-blue-500">
+                                    سعر البيع الافتراضي
+                                </p>
+
+                                <strong class="mt-1 block text-sm text-blue-900 dark:text-blue-200">
+                                    {{ money(selectedStock.selling_price) }}
+                                </strong>
+                            </div>
+                        </div>
+
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                                    الكمية
+                                    <span class="text-rose-500">*</span>
+                                </label>
+
+                                <input
+                                    v-model.number="stockForm.quantity"
+                                    type="number"
+                                    min="1"
+                                    :max="selectedStock?.available_quantity"
+                                    class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-lg font-black text-slate-950 shadow-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                                />
+                            </div>
+
+                            <div>
+                                <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                                    سعر الوحدة للعميل
+                                    <span class="text-rose-500">*</span>
+                                </label>
+
+                                <div class="relative">
+                                    <input
+                                        v-model.number="stockForm.unit_price"
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 pl-16 text-lg font-black text-slate-950 shadow-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                                    />
+
+                                    <span
+                                        class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400"
+                                    >
+                                        شيكل
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            class="flex items-center justify-between rounded-2xl bg-slate-950 px-5 py-4 text-white"
+                        >
+                            <div>
+                                <p class="text-xs font-bold text-slate-400">
+                                    القيمة على العميل
+                                </p>
+
+                                <strong class="mt-1 block text-xl font-black">
+                                    {{ money(stockPartCustomerTotal) }}
+                                </strong>
+                            </div>
+
+                            <div v-if="selectedStock" class="text-left">
+                                <p class="text-[10px] text-slate-400">
+                                    بعد الخصم من المخزون
+                                </p>
+
+                                <strong class="mt-1 block text-sm text-blue-300">
+                                    {{
+                                        Math.max(
+                                            0,
+                                            Number(selectedStock.available_quantity || 0)
+                                            - Number(stockForm.quantity || 0)
+                                        )
+                                    }}
+                                    متبقي
+                                </strong>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3 pt-1">
+                            <button
+                                type="button"
+                                :disabled="stockForm.processing"
+                                class="rounded-2xl border border-slate-300 bg-white py-3.5 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                @click="partModal = false"
+                            >
+                                إلغاء
+                            </button>
+
+                            <button
+                                type="submit"
+                                :disabled="stockForm.processing || !selectedStock"
+                                class="rounded-2xl bg-blue-600 py-3.5 text-sm font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {{
+                                    stockForm.processing
+                                        ? 'جاري الإضافة...'
+                                        : 'إضافة وخصم من المخزن'
+                                }}
+                            </button>
+                        </div>
+                    </form>
+
+                    <form
+                        v-else
+                        class="space-y-5"
+                        @submit.prevent="addExternal"
+                    >
+                        <div
+                            v-if="Object.keys(externalForm.errors).length"
+                            class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300"
+                        >
+                            {{ Object.values(externalForm.errors)[0] }}
+                        </div>
+
+                        <div
+                            class="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-sm leading-6 text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/20 dark:text-violet-300"
+                        >
+                            <strong class="block">
+                                هذه القطعة غير موجودة بالمخزن
+                            </strong>
+
+                            <span class="mt-1 block text-xs">
+                                سيتم حفظها الآن كـ«بانتظار الشراء». عند إحضارها اضغط «تسجيل الشراء» وحدد المحل والسعر والحساب المالي.
+                            </span>
+                        </div>
+
+                        <div>
+                            <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                                اسم القطعة الخارجية
+                                <span class="text-rose-500">*</span>
+                            </label>
+
+                            <input
+                                v-model.trim="externalForm.part_name"
+                                type="text"
+                                class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                                placeholder="مثال: شاشة Samsung A54 أصلية"
+                            />
+                        </div>
+
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                                    الكمية
+                                    <span class="text-rose-500">*</span>
+                                </label>
+
+                                <input
+                                    v-model.number="externalForm.quantity"
+                                    type="number"
+                                    min="1"
+                                    class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-lg font-black text-slate-950 shadow-sm focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                                />
+                            </div>
+
+                            <div>
+                                <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                                    قيمتها للعميل
+                                    <span class="font-medium text-slate-400">اختياري</span>
+                                </label>
+
+                                <div class="relative">
+                                    <input
+                                        v-model.number="externalForm.customer_unit_price"
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 pl-16 text-lg font-black text-slate-950 shadow-sm focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                                        placeholder="0.00"
+                                    />
+
+                                    <span
+                                        class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400"
+                                    >
+                                        شيكل
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                                ملاحظة عن القطعة
+                                <span class="font-medium text-slate-400">اختياري</span>
+                            </label>
+
+                            <textarea
+                                v-model.trim="externalForm.notes"
+                                rows="3"
+                                maxlength="500"
+                                class="block w-full resize-none rounded-2xl border-slate-300 bg-white px-4 py-4 text-base leading-7 text-slate-950 shadow-sm focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                                placeholder="لون، جودة، نوع مطلوب، ملاحظة للمورد..."
+                            />
+                        </div>
+
+                        <div
+                            class="flex items-center justify-between rounded-2xl bg-slate-950 px-5 py-4 text-white"
+                        >
+                            <div>
+                                <p class="text-xs font-bold text-slate-400">
+                                    القيمة المسجلة على العميل
+                                </p>
+
+                                <strong class="mt-1 block text-xl font-black">
+                                    {{ money(externalPartCustomerTotal) }}
+                                </strong>
+                            </div>
+
+                            <span
+                                class="rounded-full bg-amber-400/10 px-3 py-1.5 text-xs font-black text-amber-300"
+                            >
+                                بانتظار الشراء
+                            </span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3 pt-1">
+                            <button
+                                type="button"
+                                :disabled="externalForm.processing"
+                                class="rounded-2xl border border-slate-300 bg-white py-3.5 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                @click="partModal = false"
+                            >
+                                إلغاء
+                            </button>
+
+                            <button
+                                type="submit"
+                                :disabled="externalForm.processing || !String(externalForm.part_name || '').trim()"
+                                class="rounded-2xl bg-violet-600 py-3.5 text-sm font-black text-white shadow-lg shadow-violet-600/20 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {{
+                                    externalForm.processing
+                                        ? 'جاري الحفظ...'
+                                        : 'حفظ كقطعة بانتظار الشراء'
+                                }}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Purchase external modal -->
+        <div
+            v-if="purchaseTarget"
+            class="fixed inset-0 z-[145] flex items-center justify-center bg-slate-950/75 p-3 backdrop-blur-sm sm:p-5"
+            @mousedown.self="!purchaseForm.processing && (purchaseTarget = null)"
+        >
+            <form
+                class="flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl dark:bg-slate-900"
+                @submit.prevent="completePurchase"
+            >
+                <div class="shrink-0 border-b border-slate-200 bg-gradient-to-l from-orange-50 via-white to-amber-50 px-5 py-5 dark:border-slate-800 dark:from-orange-950/20 dark:via-slate-900 dark:to-amber-950/20 sm:px-6">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="flex items-start gap-3">
+                            <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-600 text-xl text-white shadow-lg shadow-orange-600/20">🛍️</div>
+                            <div>
+                                <p class="text-[10px] font-black uppercase tracking-[0.2em] text-orange-500">EXTERNAL PART PURCHASE</p>
+                                <h2 class="mt-1 text-xl font-black text-slate-950 dark:text-white">تسجيل شراء القطعة</h2>
+                                <p class="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                                    {{ purchaseTarget.part_name }}
+                                    <span class="mx-1 text-slate-300">•</span>
+                                    الكمية {{ purchaseTarget.quantity }}
+                                </p>
+                            </div>
+                        </div>
+                        <button type="button" :disabled="purchaseForm.processing" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl text-slate-400 transition hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:hover:text-white" @click="purchaseTarget = null">×</button>
+                    </div>
+
+                    <div class="mt-5 grid gap-2 sm:grid-cols-3">
+                        <div class="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                            <p class="text-[10px] font-black text-slate-400">القطعة</p>
+                            <strong class="mt-1 block truncate text-sm text-slate-900 dark:text-white">{{ purchaseTarget.part_name }}</strong>
+                        </div>
+                        <div class="rounded-2xl border border-orange-200 bg-orange-50 p-3 dark:border-orange-900/50 dark:bg-orange-950/20">
+                            <p class="text-[10px] font-black text-orange-500">الكمية المطلوبة</p>
+                            <strong class="mt-1 block text-sm text-orange-800 dark:text-orange-300">{{ purchaseTarget.quantity }}</strong>
+                        </div>
+                        <div class="rounded-2xl border border-violet-200 bg-violet-50 p-3 dark:border-violet-900/50 dark:bg-violet-950/20">
+                            <p class="text-[10px] font-black text-violet-500">قيمتها على العميل</p>
+                            <strong class="mt-1 block text-sm text-violet-800 dark:text-violet-300">{{ money(purchaseCustomerTotal) }}</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="min-h-0 flex-1 space-y-6 overflow-y-auto p-5 sm:p-6">
+                    <div v-if="purchaseForm.errors.purchase" class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold leading-6 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">{{ purchaseForm.errors.purchase }}</div>
+                    <div v-else-if="Object.keys(purchaseForm.errors).length" class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold leading-6 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">{{ Object.values(purchaseForm.errors)[0] }}</div>
+
+                    <section>
+                        <div class="mb-3 flex items-center gap-2">
+                            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-100 text-xs font-black text-orange-700 dark:bg-orange-950/30 dark:text-orange-300">1</span>
+                            <div><h3 class="text-sm font-black text-slate-900 dark:text-white">مصدر الشراء</h3><p class="mt-0.5 text-xs text-slate-500">اختر مورداً مسجلاً أو اكتب اسم المحل الخارجي.</p></div>
+                        </div>
+                        <div class="grid gap-4 md:grid-cols-2">
+                            <div>
+                                <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">مورد مسجل <span class="font-medium text-slate-400">اختياري</span></label>
+                                <select v-model="purchaseForm.supplier_id" class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white">
+                                    <option value="">بدون مورد مسجل</option>
+                                    <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">{{ supplier.company_name || supplier.name }}</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">اسم المحل / المصدر <span class="text-rose-500">*</span></label>
+                                <input v-model.trim="purchaseForm.purchase_from" type="text" maxlength="255" class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white" placeholder="مثال: محل أبو أحمد للموبايلات"/>
+                            </div>
+                            <div>
+                                <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">هاتف المورد <span class="font-medium text-slate-400">اختياري</span></label>
+                                <input v-model.trim="purchaseForm.supplier_phone" type="tel" dir="ltr" maxlength="30" class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-right text-base text-slate-950 shadow-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white" placeholder="059XXXXXXX"/>
+                            </div>
+                            <div>
+                                <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">رقم الفاتورة / المرجع <span class="font-medium text-slate-400">اختياري</span></label>
+                                <input v-model.trim="purchaseForm.purchase_reference" type="text" maxlength="255" class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white" placeholder="INV-001 / رقم الإيصال"/>
+                            </div>
+                        </div>
+                    </section>
+
+                    <div class="border-t border-slate-100 dark:border-slate-800"></div>
+
+                    <section>
+                        <div class="mb-3 flex items-center gap-2">
+                            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-xs font-black text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">2</span>
+                            <div><h3 class="text-sm font-black text-slate-900 dark:text-white">السعر والحساب المالي</h3><p class="mt-0.5 text-xs text-slate-500">سيتم خصم إجمالي الشراء مباشرة من الحساب المختار.</p></div>
+                        </div>
+                        <div class="grid gap-4 md:grid-cols-2">
+                            <div>
+                                <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">سعر شراء الوحدة <span class="text-rose-500">*</span></label>
+                                <div class="relative">
+                                    <input v-model.number="purchaseForm.unit_purchase_price" type="number" min="0.01" step="0.01" class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 pl-16 text-xl font-black text-slate-950 shadow-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white" placeholder="0.00"/>
+                                    <span class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">شيكل</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">الحساب الذي تم الدفع منه <span class="text-rose-500">*</span></label>
+                                <select v-model="purchaseForm.financial_account_id" class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white">
+                                    <option value="">اختر الحساب المالي</option>
+                                    <option v-for="account in financialAccounts" :key="account.id" :value="account.id">{{ account.name }} — {{ money(account.current_balance) }}</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">القيمة على العميل للوحدة <span class="font-medium text-slate-400">اختياري</span></label>
+                                <div class="relative">
+                                    <input v-model.number="purchaseForm.customer_unit_price" type="number" min="0" step="0.01" class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 pl-16 text-base font-black text-slate-950 shadow-sm focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white" placeholder="0.00"/>
+                                    <span class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">شيكل</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">تاريخ ووقت الشراء <span class="text-rose-500">*</span></label>
+                                <input v-model="purchaseForm.purchased_at" type="datetime-local" :max="nowLocal()" class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"/>
+                            </div>
+                        </div>
+
+                        <div v-if="selectedPurchaseAccount" class="mt-4 grid gap-3 rounded-2xl border p-4 sm:grid-cols-3" :class="purchaseAccountBalanceAfter < 0 ? 'border-rose-200 bg-rose-50 dark:border-rose-900/50 dark:bg-rose-950/20' : 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20'">
+                            <div><p class="text-[10px] font-black text-slate-400">رصيد الحساب قبل الشراء</p><strong class="mt-1 block text-sm text-slate-900 dark:text-white">{{ money(selectedPurchaseAccount.current_balance) }}</strong></div>
+                            <div><p class="text-[10px] font-black text-slate-400">قيمة الشراء</p><strong class="mt-1 block text-sm text-orange-700 dark:text-orange-300">- {{ money(purchaseTotalCost) }}</strong></div>
+                            <div><p class="text-[10px] font-black text-slate-400">الرصيد بعد الشراء</p><strong class="mt-1 block text-sm" :class="purchaseAccountBalanceAfter < 0 ? 'text-rose-700 dark:text-rose-300' : 'text-emerald-700 dark:text-emerald-300'">{{ money(purchaseAccountBalanceAfter) }}</strong></div>
+                        </div>
+                    </section>
+
+                    <div class="border-t border-slate-100 dark:border-slate-800"></div>
+
+                    <section>
+                        <div class="mb-3 flex items-center gap-2"><span class="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-xs font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">3</span><h3 class="text-sm font-black text-slate-900 dark:text-white">ملاحظات الشراء</h3></div>
+                        <textarea v-model.trim="purchaseForm.notes" rows="3" maxlength="500" class="block w-full resize-none rounded-2xl border-slate-300 bg-white px-4 py-4 text-base leading-7 text-slate-950 shadow-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white" placeholder="مثال: قطعة أصلية، تم فحصها قبل الاستلام، ضمان من المورد..."/>
+                    </section>
+
+                    <section class="overflow-hidden rounded-3xl bg-slate-950 p-5 text-white">
+                        <div class="flex items-center justify-between gap-4">
+                            <div><p class="text-[10px] font-black uppercase tracking-[0.18em] text-orange-300">PURCHASE SUMMARY</p><h3 class="mt-1 text-base font-black">ملخص عملية الشراء</h3></div>
+                            <span class="rounded-full bg-orange-400/10 px-3 py-1.5 text-xs font-black text-orange-300">سيتم الخصم فور التأكيد</span>
+                        </div>
+                        <div class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                            <div><p class="text-[10px] text-slate-400">الكمية</p><strong class="mt-1 block text-sm">{{ purchaseQuantity }}</strong></div>
+                            <div><p class="text-[10px] text-slate-400">سعر الوحدة</p><strong class="mt-1 block text-sm">{{ money(purchaseForm.unit_purchase_price) }}</strong></div>
+                            <div><p class="text-[10px] text-slate-400">إجمالي الشراء</p><strong class="mt-1 block text-sm text-orange-300">{{ money(purchaseTotalCost) }}</strong></div>
+                            <div><p class="text-[10px] text-slate-400">على العميل</p><strong class="mt-1 block text-sm text-violet-300">{{ money(purchaseCustomerTotal) }}</strong></div>
+                        </div>
+                    </section>
+                </div>
+
+                <div class="grid shrink-0 grid-cols-2 gap-3 border-t border-slate-200 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-950/50">
+                    <button type="button" :disabled="purchaseForm.processing" class="rounded-2xl border border-slate-300 bg-white py-3.5 text-sm font-black text-slate-700 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" @click="purchaseTarget = null">إلغاء</button>
+                    <button type="submit" :disabled="purchaseForm.processing" class="rounded-2xl bg-orange-600 py-3.5 text-sm font-black text-white shadow-lg shadow-orange-600/20 transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50">{{ purchaseForm.processing ? 'جاري تسجيل الشراء...' : 'تأكيد الشراء وخصم المبلغ' }}</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Simple reason modal reusable-ish -->
+        <div v-if="revertStockTarget" class="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/70 p-4"><form class="w-full max-w-md rounded-3xl bg-white p-6 dark:bg-slate-900" @submit.prevent="revertStock"><h2 class="font-black dark:text-white">إرجاع {{ revertStockTarget.product_name }} للمخزن</h2><textarea v-model="revertStockForm.reason" required rows="3" class="mt-4 w-full rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="سبب الإرجاع"/><button class="mt-3 w-full rounded-xl bg-rose-600 py-3 font-black text-white">تأكيد الإرجاع</button><button type="button" class="mt-2 w-full text-xs text-slate-500" @click="revertStockTarget = null">إلغاء</button></form></div>
+        <div v-if="returnExternalTarget" class="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/70 p-4"><form class="w-full max-w-md rounded-3xl bg-white p-6 dark:bg-slate-900" @submit.prevent="returnExternal"><h2 class="font-black dark:text-white">إرجاع القطعة للمصدر</h2><p class="mt-2 text-xs text-slate-500">سيتم عكس حركة الشراء وإرجاع قيمتها إلى الحساب المالي الأصلي.</p><textarea v-model="returnExternalForm.reason" required rows="3" class="mt-4 w-full rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="سبب الإرجاع"/><button class="mt-3 w-full rounded-xl bg-rose-600 py-3 font-black text-white">تأكيد الإرجاع المالي</button><button type="button" class="mt-2 w-full text-xs text-slate-500" @click="returnExternalTarget = null">إلغاء</button></form></div>
+
+        <!-- payment -->
+        <div
+            v-if="paymentModal"
+            class="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/75 p-3 backdrop-blur-sm sm:p-5"
+            @mousedown.self="!paymentForm.processing && (paymentModal = false)"
+        >
+            <form
+                class="flex max-h-[94vh] w-full max-w-2xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl dark:bg-slate-900"
+                @submit.prevent="addPayment"
+            >
+                <div
+                    class="shrink-0 border-b border-slate-200 bg-gradient-to-l from-emerald-50 via-white to-cyan-50 px-5 py-5 dark:border-slate-800 dark:from-emerald-950/20 dark:via-slate-900 dark:to-cyan-950/20 sm:px-6"
+                >
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="flex items-start gap-3">
+                            <div
+                                class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-xl text-white shadow-lg shadow-emerald-600/20"
+                            >
+                                ₪
+                            </div>
+
+                            <div>
+                                <h2
+                                    class="text-xl font-black text-slate-950 dark:text-white"
+                                >
+                                    تسجيل دفعة صيانة
+                                </h2>
+
+                                <p
+                                    class="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400"
+                                >
+                                    سجّل عربونًا أو دفعة على طلب الصيانة قبل الاستلام.
+                                </p>
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            :disabled="paymentForm.processing"
+                            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl text-slate-400 transition hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:hover:text-white"
+                            @click="paymentModal = false"
+                        >
+                            ×
+                        </button>
+                    </div>
+
+                    <div class="mt-5 grid grid-cols-3 gap-2">
+                        <div
+                            class="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800"
+                        >
+                            <p class="text-[10px] font-black text-slate-400">
+                                إجمالي الطلب
+                            </p>
+
+                            <strong class="mt-1 block text-sm text-slate-900 dark:text-white">
+                                {{ money(order.total_amount) }}
+                            </strong>
+                        </div>
+
+                        <div
+                            class="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20"
+                        >
+                            <p class="text-[10px] font-black text-emerald-500">
+                                المدفوع سابقًا
+                            </p>
+
+                            <strong class="mt-1 block text-sm text-emerald-700 dark:text-emerald-300">
+                                {{ money(order.paid_amount) }}
+                            </strong>
+                        </div>
+
+                        <div
+                            class="rounded-2xl border border-rose-200 bg-rose-50 p-3 dark:border-rose-900/50 dark:bg-rose-950/20"
+                        >
+                            <p class="text-[10px] font-black text-rose-500">
+                                المتبقي
+                            </p>
+
+                            <strong class="mt-1 block text-sm text-rose-700 dark:text-rose-300">
+                                {{ money(order.remaining_amount) }}
+                            </strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    class="min-h-0 flex-1 space-y-5 overflow-y-auto p-5 sm:p-6"
+                >
+                    <div
+                        v-if="paymentForm.errors.payment"
+                        class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold leading-6 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300"
+                    >
+                        {{ paymentForm.errors.payment }}
+                    </div>
+
+                    <div
+                        v-else-if="Object.keys(paymentForm.errors).length"
+                        class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold leading-6 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300"
+                    >
+                        {{ Object.values(paymentForm.errors)[0] }}
+                    </div>
+
+                    <div>
+                        <div class="mb-2 flex items-center justify-between gap-2">
+                            <label class="text-sm font-black text-slate-700 dark:text-slate-200">
+                                مبلغ الدفعة
+                                <span class="text-rose-500">*</span>
+                            </label>
+
+                            <div class="flex gap-1.5">
+                                <button
+                                    type="button"
+                                    class="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-black text-slate-600 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+                                    @click="setPaymentAmount('half')"
+                                >
+                                    نصف المتبقي
+                                </button>
+
+                                <button
+                                    type="button"
+                                    class="rounded-lg bg-emerald-100 px-2.5 py-1.5 text-[10px] font-black text-emerald-700 transition hover:bg-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300"
+                                    @click="setPaymentAmount('full')"
+                                >
+                                    كامل المتبقي
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="relative">
+                            <input
+                                v-model.number="paymentForm.amount"
+                                type="number"
+                                min="0.01"
+                                :max="order.remaining_amount"
+                                step="0.01"
+                                class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 pl-20 text-2xl font-black text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                            />
+
+                            <span
+                                class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400"
+                            >
+                                شيكل
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                                طريقة الدفع
+                                <span class="text-rose-500">*</span>
+                            </label>
+
+                            <select
+                                v-model="paymentForm.payment_method"
+                                class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                            >
+                                <option
+                                    v-for="(label, value) in paymentMethods"
+                                    :key="value"
+                                    :value="value"
+                                >
+                                    {{ label }}
+                                </option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                                الحساب المالي
+                                <span class="text-rose-500">*</span>
+                            </label>
+
+                            <select
+                                v-model="paymentForm.financial_account_id"
+                                class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                            >
+                                <option value="">اختر الحساب</option>
+
+                                <option
+                                    v-for="account in compatibleAccounts(paymentForm.payment_method)"
+                                    :key="account.id"
+                                    :value="account.id"
+                                >
+                                    {{ account.name }} — {{ money(account.current_balance) }}
+                                </option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div
+                        v-if="selectedPaymentAccount"
+                        class="grid grid-cols-2 gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20"
+                    >
+                        <div>
+                            <p class="text-[10px] font-black text-emerald-500">
+                                رصيد الحساب قبل الدفعة
+                            </p>
+
+                            <strong class="mt-1 block text-sm text-emerald-800 dark:text-emerald-200">
+                                {{ money(selectedPaymentAccount.current_balance) }}
+                            </strong>
+                        </div>
+
+                        <div>
+                            <p class="text-[10px] font-black text-emerald-500">
+                                الرصيد بعد الدفعة
+                            </p>
+
+                            <strong class="mt-1 block text-sm text-emerald-800 dark:text-emerald-200">
+                                {{ money(paymentAccountBalanceAfter) }}
+                            </strong>
+                        </div>
+                    </div>
+
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                                تاريخ الدفع
+                                <span class="text-rose-500">*</span>
+                            </label>
+
+                            <input
+                                v-model="paymentForm.paid_at"
+                                type="datetime-local"
+                                :max="nowLocal()"
+                                class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                            />
+                        </div>
+
+                        <div
+                            v-if="['bank_transfer', 'banking_app'].includes(paymentForm.payment_method)"
+                        >
+                            <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                                البنك / التطبيق
+                            </label>
+
+                            <input
+                                v-model.trim="paymentForm.bank_or_app_name"
+                                type="text"
+                                maxlength="255"
+                                class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                                placeholder="يتم تعبئته تلقائيًا من الحساب"
+                            />
+                        </div>
+                    </div>
+
+                    <div
+                        v-if="['bank_transfer', 'banking_app'].includes(paymentForm.payment_method)"
+                    >
+                        <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                            رقم / مرجع العملية
+                            <span class="font-medium text-slate-400">اختياري</span>
+                        </label>
+
+                        <input
+                            v-model.trim="paymentForm.transaction_reference"
+                            type="text"
+                            maxlength="255"
+                            class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                            placeholder="رقم التحويل أو العملية"
+                        />
+                    </div>
+
+                    <div>
+                        <label class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200">
+                            ملاحظات الدفعة
+                            <span class="font-medium text-slate-400">اختياري</span>
+                        </label>
+
+                        <textarea
+                            v-model.trim="paymentForm.notes"
+                            rows="3"
+                            maxlength="500"
+                            class="block w-full resize-none rounded-2xl border-slate-300 bg-white px-4 py-4 text-base leading-7 text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                            placeholder="مثال: عربون على الصيانة..."
+                        />
+                    </div>
+
+                    <div
+                        class="grid grid-cols-2 gap-3 rounded-2xl bg-slate-950 p-4 text-white"
+                    >
+                        <div>
+                            <p class="text-[10px] font-black text-slate-400">
+                                الدفعة الحالية
+                            </p>
+
+                            <strong class="mt-1 block text-lg text-emerald-300">
+                                {{ money(paymentForm.amount) }}
+                            </strong>
+                        </div>
+
+                        <div>
+                            <p class="text-[10px] font-black text-slate-400">
+                                المتبقي بعدها
+                            </p>
+
+                            <strong
+                                class="mt-1 block text-lg"
+                                :class="
+                                    paymentRemainingAfter > 0
+                                        ? 'text-rose-300'
+                                        : 'text-emerald-300'
+                                "
+                            >
+                                {{ money(paymentRemainingAfter) }}
+                            </strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    class="grid shrink-0 grid-cols-2 gap-3 border-t border-slate-200 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-950/50"
+                >
+                    <button
+                        type="button"
+                        :disabled="paymentForm.processing"
+                        class="rounded-2xl border border-slate-300 bg-white py-3.5 text-sm font-black text-slate-700 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                        @click="paymentModal = false"
+                    >
+                        إلغاء
+                    </button>
+
+                    <button
+                        type="submit"
+                        :disabled="paymentForm.processing"
+                        class="rounded-2xl bg-emerald-600 py-3.5 text-sm font-black text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        {{
+                            paymentForm.processing
+                                ? 'جاري تسجيل الدفعة...'
+                                : 'تأكيد تسجيل الدفعة'
+                        }}
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- deliver -->
+        <div
+            v-if="deliverModal"
+            class="fixed inset-0 z-[155] flex items-center justify-center bg-slate-950/80 p-3 backdrop-blur-md sm:p-5"
+            @mousedown.self="!deliverForm.processing && (deliverModal = false)"
+        >
+            <form
+                class="flex max-h-[95vh] w-full max-w-3xl flex-col overflow-hidden rounded-[30px] bg-white shadow-2xl dark:bg-slate-900"
+                @submit.prevent="deliver"
+            >
+                <!-- Header -->
+                <div
+                    class="relative shrink-0 overflow-hidden border-b border-slate-200 bg-gradient-to-l from-emerald-50 via-white to-blue-50 px-5 py-5 dark:border-slate-800 dark:from-emerald-950/20 dark:via-slate-900 dark:to-blue-950/20 sm:px-6"
+                >
+                    <div
+                        class="pointer-events-none absolute -left-12 -top-12 h-36 w-36 rounded-full bg-emerald-400/10 blur-3xl"
+                    ></div>
+
+                    <div
+                        class="pointer-events-none absolute -bottom-16 right-10 h-40 w-40 rounded-full bg-blue-400/10 blur-3xl"
+                    ></div>
+
+                    <div
+                        class="relative flex items-start justify-between gap-4"
+                    >
+                        <div
+                            class="flex items-start gap-3"
+                        >
+                            <div
+                                class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-xl text-white shadow-lg shadow-emerald-600/20"
+                            >
+                                ✓
+                            </div>
+
+                            <div>
+                                <div
+                                    class="flex flex-wrap items-center gap-2"
+                                >
+                                    <h2
+                                        class="text-xl font-black text-slate-950 dark:text-white"
+                                    >
+                                        دفع وتسليم الجهاز
+                                    </h2>
+
+                                    <span
+                                        class="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
+                                    >
+                                        المرحلة الأخيرة
+                                    </span>
+                                </div>
+
+                                <p
+                                    class="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400"
+                                >
+                                    سجّل آخر دفعة ثم أكد تسليم الجهاز للعميل.
+                                </p>
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            :disabled="deliverForm.processing"
+                            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl text-slate-400 transition hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:hover:text-white"
+                            @click="deliverModal = false"
+                        >
+                            ×
+                        </button>
+                    </div>
+
+                    <!-- Device/customer snapshot -->
+                    <div
+                        class="relative mt-5 grid gap-3 sm:grid-cols-2"
+                    >
+                        <div
+                            class="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-800/90"
+                        >
+                            <p
+                                class="text-[10px] font-black uppercase tracking-wider text-slate-400"
+                            >
+                                العميل
+                            </p>
+
+                            <strong
+                                class="mt-1 block text-sm text-slate-950 dark:text-white"
+                            >
+                                {{ order.customer_name }}
+                            </strong>
+
+                            <span
+                                dir="ltr"
+                                class="mt-1 block text-right text-xs text-slate-500"
+                            >
+                                {{ order.customer_phone }}
+                            </span>
+                        </div>
+
+                        <div
+                            class="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-800/90"
+                        >
+                            <p
+                                class="text-[10px] font-black uppercase tracking-wider text-slate-400"
+                            >
+                                الجهاز
+                            </p>
+
+                            <strong
+                                class="mt-1 block text-sm text-slate-950 dark:text-white"
+                            >
+                                {{ [order.brand, order.model].filter(Boolean).join(' ') || order.device_type }}
+                            </strong>
+
+                            <span
+                                class="mt-1 block text-xs text-slate-500"
+                            >
+                                {{ order.order_number }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Content -->
+                <div
+                    class="min-h-0 flex-1 space-y-5 overflow-y-auto p-5 sm:p-6"
+                >
+                    <!-- Errors -->
+                    <div
+                        v-if="deliverForm.errors.delivery"
+                        class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold leading-6 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300"
+                    >
+                        <div class="flex items-start gap-3">
+                            <div
+                                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-100 font-black text-rose-600 dark:bg-rose-950/40"
+                            >
+                                !
+                            </div>
+
+                            <div>
+                                <strong class="block">
+                                    تعذر إكمال عملية التسليم
+                                </strong>
+
+                                <p class="mt-1 text-xs leading-6">
+                                    {{ deliverForm.errors.delivery }}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div
+                        v-else-if="Object.keys(deliverForm.errors).length"
+                        class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold leading-6 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300"
+                    >
+                        {{ Object.values(deliverForm.errors)[0] }}
+                    </div>
+
+                    <!-- Financial summary -->
+                    <section
+                        class="grid gap-3 sm:grid-cols-3"
+                    >
+                        <div
+                            class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50"
+                        >
+                            <p
+                                class="text-[10px] font-black text-slate-400"
+                            >
+                                إجمالي الصيانة
+                            </p>
+
+                            <strong
+                                class="mt-1 block text-base text-slate-950 dark:text-white"
+                            >
+                                {{ money(order.total_amount) }}
+                            </strong>
+                        </div>
+
+                        <div
+                            class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20"
+                        >
+                            <p
+                                class="text-[10px] font-black text-emerald-500"
+                            >
+                                المدفوع سابقًا
+                            </p>
+
+                            <strong
+                                class="mt-1 block text-base text-emerald-700 dark:text-emerald-300"
+                            >
+                                {{ money(order.paid_amount) }}
+                            </strong>
+                        </div>
+
+                        <div
+                            class="rounded-2xl border border-rose-200 bg-rose-50 p-4 dark:border-rose-900/50 dark:bg-rose-950/20"
+                        >
+                            <p
+                                class="text-[10px] font-black text-rose-500"
+                            >
+                                المتبقي قبل التسليم
+                            </p>
+
+                            <strong
+                                class="mt-1 block text-base text-rose-700 dark:text-rose-300"
+                            >
+                                {{ money(order.remaining_amount) }}
+                            </strong>
+                        </div>
+                    </section>
+
+                    <!-- Payment amount -->
+                    <section
+                        class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+                    >
+                        <div
+                            class="mb-4 flex flex-wrap items-center justify-between gap-3"
+                        >
+                            <div>
+                                <h3
+                                    class="text-sm font-black text-slate-950 dark:text-white"
+                                >
+                                    المبلغ المدفوع الآن
+                                </h3>
+
+                                <p
+                                    class="mt-1 text-xs text-slate-500"
+                                >
+                                    غالبًا يكون كامل المبلغ المتبقي عند الاستلام.
+                                </p>
+                            </div>
+
+                            <button
+                                type="button"
+                                class="rounded-xl bg-emerald-100 px-3 py-2 text-xs font-black text-emerald-700 transition hover:bg-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300"
+                                @click="deliverForm.payment_amount = Number(order.remaining_amount || 0)"
+                            >
+                                دفع كامل المتبقي
+                            </button>
+                        </div>
+
+                        <div class="relative">
+                            <input
+                                v-model.number="deliverForm.payment_amount"
+                                type="number"
+                                min="0"
+                                :max="order.remaining_amount"
+                                step="0.01"
+                                class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 pl-20 text-2xl font-black text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                            />
+
+                            <span
+                                class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400"
+                            >
+                                شيكل
+                            </span>
+                        </div>
+                    </section>
+
+                    <!-- Payment details -->
+                    <section
+                        v-if="Number(deliverForm.payment_amount || 0) > 0"
+                        class="rounded-3xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-700 dark:bg-slate-800/40"
+                    >
+                        <div
+                            class="mb-4"
+                        >
+                            <h3
+                                class="text-sm font-black text-slate-950 dark:text-white"
+                            >
+                                تفاصيل الدفع
+                            </h3>
+
+                            <p
+                                class="mt-1 text-xs text-slate-500"
+                            >
+                                حدد الطريقة والحساب الذي ستدخل إليه الدفعة.
+                            </p>
+                        </div>
+
+                        <div
+                            class="grid gap-4 sm:grid-cols-2"
+                        >
+                            <div>
+                                <label
+                                    class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200"
+                                >
+                                    طريقة الدفع
+                                    <span class="text-rose-500">*</span>
+                                </label>
+
+                                <select
+                                    v-model="deliverForm.payment_method"
+                                    class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                                >
+                                    <option
+                                        v-for="(label, value) in paymentMethods"
+                                        :key="value"
+                                        :value="value"
+                                    >
+                                        {{ label }}
+                                    </option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label
+                                    class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200"
+                                >
+                                    الحساب المالي
+                                    <span class="text-rose-500">*</span>
+                                </label>
+
+                                <select
+                                    v-model="deliverForm.financial_account_id"
+                                    class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                                >
+                                    <option value="">
+                                        اختر الحساب
+                                    </option>
+
+                                    <option
+                                        v-for="account in compatibleAccounts(deliverForm.payment_method)"
+                                        :key="account.id"
+                                        :value="account.id"
+                                    >
+                                        {{ account.name }}
+                                        — {{ money(account.current_balance) }}
+                                    </option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div
+                            v-if="selectedDeliveryAccount"
+                            class="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-emerald-200 bg-white p-4 dark:border-emerald-900/50 dark:bg-slate-900"
+                        >
+                            <div>
+                                <p
+                                    class="text-[10px] font-black text-emerald-500"
+                                >
+                                    رصيد الحساب قبل
+                                </p>
+
+                                <strong
+                                    class="mt-1 block text-sm text-slate-900 dark:text-white"
+                                >
+                                    {{ money(selectedDeliveryAccount.current_balance) }}
+                                </strong>
+                            </div>
+
+                            <div>
+                                <p
+                                    class="text-[10px] font-black text-emerald-500"
+                                >
+                                    الرصيد بعد الدفعة
+                                </p>
+
+                                <strong
+                                    class="mt-1 block text-sm text-emerald-700 dark:text-emerald-300"
+                                >
+                                    {{
+                                        money(
+                                            Number(
+                                                selectedDeliveryAccount.current_balance
+                                                || 0
+                                            )
+                                            + Number(
+                                                deliverForm.payment_amount
+                                                || 0
+                                            )
+                                        )
+                                    }}
+                                </strong>
+                            </div>
+                        </div>
+
+                        <div
+                            class="mt-4 grid gap-4 sm:grid-cols-2"
+                        >
+                            <div>
+                                <label
+                                    class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200"
+                                >
+                                    تاريخ الدفع
+                                </label>
+
+                                <input
+                                    v-model="deliverForm.paid_at"
+                                    type="datetime-local"
+                                    :max="nowLocal()"
+                                    class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                                />
+                            </div>
+
+                            <div
+                                v-if="['bank_transfer', 'banking_app'].includes(deliverForm.payment_method)"
+                            >
+                                <label
+                                    class="mb-2 block text-sm font-black text-slate-700 dark:text-slate-200"
+                                >
+                                    مرجع العملية
+                                    <span class="font-medium text-slate-400">
+                                        اختياري
+                                    </span>
+                                </label>
+
+                                <input
+                                    v-model.trim="deliverForm.transaction_reference"
+                                    type="text"
+                                    maxlength="255"
+                                    class="block w-full rounded-2xl border-slate-300 bg-white px-4 py-4 text-base text-slate-950 shadow-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                                    placeholder="رقم التحويل أو العملية"
+                                />
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Final outcome -->
+                    <section
+                        class="overflow-hidden rounded-3xl border border-slate-200 bg-slate-950 text-white dark:border-slate-700"
+                    >
+                        <div
+                            class="grid grid-cols-2 gap-px bg-white/10"
+                        >
+                            <div
+                                class="bg-slate-950 p-5"
+                            >
+                                <p
+                                    class="text-[10px] font-black text-slate-400"
+                                >
+                                    المدفوع الآن
+                                </p>
+
+                                <strong
+                                    class="mt-1 block text-xl text-emerald-300"
+                                >
+                                    {{ money(deliverForm.payment_amount) }}
+                                </strong>
+                            </div>
+
+                            <div
+                                class="bg-slate-950 p-5"
+                            >
+                                <p
+                                    class="text-[10px] font-black text-slate-400"
+                                >
+                                    المتبقي بعد التسليم
+                                </p>
+
+                                <strong
+                                    class="mt-1 block text-xl"
+                                    :class="
+                                        deliveryRemainingAfterPayment > 0
+                                            ? 'text-rose-300'
+                                            : 'text-emerald-300'
+                                    "
+                                >
+                                    {{ money(deliveryRemainingAfterPayment) }}
+                                </strong>
+                            </div>
+                        </div>
+
+                        <div
+                            class="border-t border-white/10 px-5 py-4"
+                        >
+                            <div
+                                class="flex items-center gap-3"
+                            >
+                                <div
+                                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-300"
+                                >
+                                    ✓
+                                </div>
+
+                                <div>
+                                    <strong
+                                        class="block text-sm"
+                                    >
+                                        بعد التأكيد سيتم تسليم الجهاز
+                                    </strong>
+
+                                    <span
+                                        class="mt-1 block text-xs text-slate-400"
+                                    >
+                                        سيتم تحديث حالة الطلب وتسجيل الدفعة والحركة المالية في نفس العملية.
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Debt confirmation -->
+                    <label
+                        v-if="deliveryRemainingAfterPayment > 0.00001"
+                        class="flex cursor-pointer items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-900/50 dark:bg-amber-950/20"
+                    >
+                        <input
+                            v-model="deliverForm.allow_partial_payment"
+                            type="checkbox"
+                            class="mt-1 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                        />
+
+                        <span>
+                            <strong
+                                class="block text-amber-900 dark:text-amber-200"
+                            >
+                                السماح بالتسليم مع بقاء دين
+                            </strong>
+
+                            <span
+                                class="mt-1 block text-xs leading-6 text-amber-700 dark:text-amber-300"
+                            >
+                                سيبقى على العميل
+                                <strong>
+                                    {{ money(deliveryRemainingAfterPayment) }}
+                                </strong>
+                                وسيظهر في مستحقات العملاء وكشف حسابه.
+                            </span>
+                        </span>
+                    </label>
+                </div>
+
+                <!-- Footer -->
+                <div
+                    class="grid shrink-0 gap-3 border-t border-slate-200 bg-slate-50 p-5 sm:grid-cols-[1fr_1.4fr] dark:border-slate-800 dark:bg-slate-950/50"
+                >
+                    <button
+                        type="button"
+                        :disabled="deliverForm.processing"
+                        class="rounded-2xl border border-slate-300 bg-white py-3.5 text-sm font-black text-slate-700 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                        @click="deliverModal = false"
+                    >
+                        رجوع
+                    </button>
+
+                    <button
+                        type="submit"
+                        :disabled="deliverForm.processing"
+                        class="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-3.5 text-sm font-black text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        <span
+                            v-if="deliverForm.processing"
+                            class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                        ></span>
+
+                        <span v-else>
+                            ✓
+                        </span>
+
+                        {{
+                            deliverForm.processing
+                                ? 'جاري تسجيل الدفع والتسليم...'
+                                : 'تأكيد الدفع وتسليم الجهاز'
+                        }}
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Intake image preview -->
+        <div
+            v-if="intakeImageModal"
+            class="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm"
+            @mousedown.self="intakeImageModal = null"
+        >
+            <div class="relative flex max-h-[92vh] w-full max-w-6xl items-center justify-center">
+                <img
+                    :src="attachmentUrl(intakeImageModal)"
+                    alt="صورة الجهاز عند الاستلام"
+                    class="max-h-[88vh] max-w-full rounded-2xl object-contain shadow-2xl"
+                />
+
+                <button
+                    type="button"
+                    class="absolute left-2 top-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-white/95 text-xl font-black text-slate-800 shadow-xl transition hover:bg-white"
+                    @click="intakeImageModal = null"
+                >
+                    ×
+                </button>
+            </div>
+        </div>
+
+        <!-- cancel -->
+        <div v-if="cancelModal" class="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/70 p-4"><form class="w-full max-w-md rounded-3xl bg-white p-6 dark:bg-slate-900" @submit.prevent="cancelOrder"><h2 class="font-black text-rose-700">إلغاء طلب الصيانة</h2><p class="mt-2 text-xs text-slate-500">ستعاد قطع المخزون وستعكس دفعات العميل. القطع الخارجية المشتراة لا تعكس تلقائياً.</p><textarea v-model="cancelForm.reason" required rows="3" class="mt-4 w-full rounded-xl border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="سبب الإلغاء"/><button class="mt-4 w-full rounded-xl bg-rose-600 py-3 font-black text-white">تأكيد الإلغاء</button><button type="button" class="mt-2 w-full text-xs text-slate-500" @click="cancelModal = false">رجوع</button></form></div>
+    </AuthenticatedLayout>
+</template>

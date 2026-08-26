@@ -3,6 +3,7 @@
 namespace App\Services\Reports;
 
 use App\Enums\RepairOrderStatus;
+use App\Models\RepairExternalPart;
 use App\Models\RepairOrder;
 use App\Models\RepairPart;
 use Illuminate\Database\Eloquent\Builder;
@@ -25,6 +26,7 @@ class RepairReportService
                 'customer',
                 'parts.product',
                 'parts.warehouse',
+                'externalParts.supplier',
                 'payments.financialAccount',
             ]);
 
@@ -177,25 +179,49 @@ class RepairReportService
         $topParts = collect();
 
         if ($orderIds->isNotEmpty()) {
-            $topParts = RepairPart::query()
-                ->with('product')
-                ->whereIn(
-                    'repair_order_id',
-                    $orderIds
-                )
+            $stockParts = RepairPart::query()
+                ->whereIn('repair_order_id', $orderIds)
+                ->where('is_committed', true)
                 ->select([
-                    'product_id',
-
-                    DB::raw(
-                        'SUM(quantity) as total_quantity'
-                    ),
+                    'product_name',
+                    DB::raw('SUM(quantity) as total_quantity'),
                 ])
-                ->groupBy('product_id')
-                ->orderByDesc(
-                    'total_quantity'
-                )
-                ->limit(10)
-                ->get();
+                ->groupBy('product_name')
+                ->get()
+                ->map(fn (RepairPart $part): array => [
+                    'product' => ['name' => $part->product_name],
+                    'source' => 'المخزن',
+                    'total_quantity' => (int) $part->total_quantity,
+                ]);
+
+            $externalParts = RepairExternalPart::query()
+                ->whereIn('repair_order_id', $orderIds)
+                ->where('status', 'purchased')
+                ->select([
+                    'part_name',
+                    DB::raw('SUM(quantity) as total_quantity'),
+                ])
+                ->groupBy('part_name')
+                ->get()
+                ->map(fn (RepairExternalPart $part): array => [
+                    'product' => ['name' => $part->part_name],
+                    'source' => 'خارجي',
+                    'total_quantity' => (int) $part->total_quantity,
+                ]);
+
+            $topParts = $stockParts
+                ->concat($externalParts)
+                ->groupBy(fn (array $row): string => $row['product']['name'])
+                ->map(function (Collection $group): array {
+                    return [
+                        'product' => ['name' => $group->first()['product']['name']],
+                        'source' => $group->pluck('source')->unique()->implode(' + '),
+                        'total_quantity' => (int) $group->sum('total_quantity'),
+                    ];
+                })
+                ->sortByDesc('total_quantity')
+                ->take(10)
+                ->values();
         }
 
         /*

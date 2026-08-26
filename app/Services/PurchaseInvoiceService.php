@@ -20,7 +20,8 @@ use Illuminate\Support\Facades\DB;
 class PurchaseInvoiceService
 {
     public function __construct(
-        private readonly FinancialAccountService $financeService
+        private readonly FinancialAccountService $financeService,
+        private readonly ProductService $productService
     ) {}
 
     /**
@@ -48,9 +49,21 @@ class PurchaseInvoiceService
                     );
                 }
 
+                /*
+                 * نحول البنود التي تحتوي على منتج جديد إلى Product فعلي
+                 * داخل نفس Transaction، لكن بدون أي رصيد افتتاحي.
+                 *
+                 * لذلك المنتج يظهر في بطاقة المنتجات مباشرة،
+                 * بينما الكمية تبقى 0 حتى اعتماد فاتورة الشراء.
+                 */
+                $resolvedItems =
+                    $this->resolveInlineProducts(
+                        $data['items']
+                            ?? []
+                    );
+
                 $this->assertUniqueProducts(
-                    $data['items']
-                        ?? []
+                    $resolvedItems
                 );
 
                 /*
@@ -121,7 +134,7 @@ class PurchaseInvoiceService
                     ]);
 
                 foreach (
-                    $data['items'] as $itemData
+                    $resolvedItems as $itemData
                 ) {
                     $this->addItem(
                         $invoice,
@@ -1471,9 +1484,14 @@ class PurchaseInvoiceService
                     );
                 }
 
+                $resolvedItems =
+                    $this->resolveInlineProducts(
+                        $data['items']
+                            ?? []
+                    );
+
                 $this->assertUniqueProducts(
-                    $data['items']
-                        ?? []
+                    $resolvedItems
                 );
 
                 $lockedInvoice->update([
@@ -1518,7 +1536,7 @@ class PurchaseInvoiceService
                     ->delete();
 
                 foreach (
-                    $data['items'] as $itemData
+                    $resolvedItems as $itemData
                 ) {
                     $this->addItem(
                         $lockedInvoice,
@@ -1557,6 +1575,186 @@ class PurchaseInvoiceService
         }
 
         return PaymentStatus::UNPAID;
+    }
+
+
+    /**
+     * إنشاء المنتجات الجديدة المضافة من شاشة فاتورة الشراء.
+     *
+     * القاعدة المحاسبية هنا مهمة:
+     * - Product يتم إنشاؤه كرأس بيانات فقط.
+     * - purchase_price يبدأ = 0.
+     * - لا يتم إنشاء ProductStock ولا Opening Movement.
+     * - عند اعتماد الفاتورة فقط، approve() يضيف الكمية ويحسب
+     *   متوسط التكلفة الحقيقي من Landed Cost.
+     *
+     * مثال:
+     * منتج جديد + كمية فاتورة 6
+     * قبل الاعتماد: stock = 0
+     * بعد الاعتماد: stock = 6
+     * وليس 7.
+     */
+    private function resolveInlineProducts(
+        array $items
+    ): array {
+        $resolved = [];
+
+        foreach (
+            $items as $item
+        ) {
+            $mode =
+                $item['product_mode']
+                    ?? 'existing';
+
+            if ($mode !== 'new') {
+                if (
+                    empty(
+                        $item['product_id']
+                    )
+                ) {
+                    throw new \RuntimeException(
+                        'أحد بنود الفاتورة لا يحتوي على منتج صالح.'
+                    );
+                }
+
+                $resolved[] =
+                    $item;
+
+                continue;
+            }
+
+            $newProduct =
+                $item['new_product']
+                    ?? [];
+
+            $product =
+                $this->productService
+                    ->create(
+                        [
+                            'category_id' =>
+                            (int) (
+                                $newProduct[
+                                    'category_id'
+                                ]
+                                ?? 0
+                            ),
+
+                            'name' =>
+                            trim(
+                                (string) (
+                                    $newProduct[
+                                        'name'
+                                    ]
+                                    ?? ''
+                                )
+                            ),
+
+                            /*
+                             * فارغ = ProductService يولد الكود.
+                             */
+                            'code' =>
+                            $newProduct[
+                                'code'
+                            ]
+                                ?? null,
+
+                            'barcode' =>
+                            $newProduct[
+                                'barcode'
+                            ]
+                                ?? null,
+
+                            'brand' =>
+                            $newProduct[
+                                'brand'
+                            ]
+                                ?? null,
+
+                            'model' =>
+                            $newProduct[
+                                'model'
+                            ]
+                                ?? null,
+
+                            /*
+                             * لا نسجل تكلفة شراء وهمية قبل اعتماد الشراء.
+                             * approve() سيحدثها إلى المتوسط المرجح الحقيقي.
+                             */
+                            'purchase_price' =>
+                            0,
+
+                            'selling_price' =>
+                            round(
+                                (float) (
+                                    $newProduct[
+                                        'selling_price'
+                                    ]
+                                    ?? 0
+                                ),
+                                2
+                            ),
+
+                            'minimum_selling_price' =>
+                            $newProduct[
+                                'minimum_selling_price'
+                            ]
+                                ?? null,
+
+                            'low_stock_threshold' =>
+                            (int) (
+                                $newProduct[
+                                    'low_stock_threshold'
+                                ]
+                                ?? 5
+                            ),
+
+                            'location' =>
+                            $newProduct[
+                                'location'
+                            ]
+                                ?? null,
+
+                            /*
+                             * صفر رصيد افتتاحي دائماً.
+                             */
+                            'opening_stocks' =>
+                            [],
+
+                            'description' =>
+                            $newProduct[
+                                'description'
+                            ]
+                                ?? null,
+
+                            'notes' =>
+                            $newProduct[
+                                'notes'
+                            ]
+                                ?? null,
+
+                            'is_active' =>
+                            true,
+                        ]
+                    );
+
+            $item['product_id'] =
+                $product->id;
+
+            /*
+             * بعد الحل لا يحتاج addItem لهذه البيانات.
+             */
+            unset(
+                $item['new_product']
+            );
+
+            $item['product_mode'] =
+                'existing';
+
+            $resolved[] =
+                $item;
+        }
+
+        return $resolved;
     }
 
     private function assertUniqueProducts(

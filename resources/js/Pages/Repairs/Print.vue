@@ -1,187 +1,50 @@
-<template>
-    <div class="min-h-screen bg-gray-100 p-8 print:bg-white print:p-4">
-        <div class="mx-auto max-w-4xl rounded-2xl bg-white p-8 shadow-lg print:shadow-none">
-            <!-- رأس الفاتورة -->
-            <div class="flex items-center justify-between border-b pb-6">
-                <div>
-                    <h1 class="text-2xl font-bold text-gray-900">فنانة فون</h1>
-                    <p class="text-sm text-gray-500">إدارة معرض الهواتف</p>
-                    <p class="text-sm text-gray-500">هاتف: 0599-123456</p>
-                </div>
-                <div class="text-left">
-                    <p class="text-sm font-bold text-gray-900">فاتورة صيانة</p>
-                    <p class="text-sm text-gray-600">{{ order.order_number }}</p>
-                    <p class="text-sm text-gray-500">التاريخ: {{ formatDate(order.received_at) }}</p>
-                </div>
-            </div>
-
-            <!-- بيانات العميل والجهاز -->
-            <div class="mt-6 grid grid-cols-2 gap-6">
-                <div>
-                    <h3 class="text-sm font-bold text-gray-700">بيانات العميل</h3>
-                    <p class="text-sm text-gray-600">{{ order.customer_name }}</p>
-                    <p class="text-sm text-gray-600">{{ order.customer_phone }}</p>
-                </div>
-                <div>
-                    <h3 class="text-sm font-bold text-gray-700">بيانات الجهاز</h3>
-                    <p class="text-sm text-gray-600">{{ order.brand }} {{ order.model }}</p>
-                    <p class="text-sm text-gray-600">{{ order.device_type }}</p>
-                    <p class="text-sm text-gray-600" v-if="order.color">اللون: {{ order.color }}</p>
-                </div>
-            </div>
-
-            <!-- المشكلة والإصلاح -->
-            <div class="mt-4 border-t pt-4">
-                <h3 class="text-sm font-bold text-gray-700">المشكلة</h3>
-                <p class="text-sm text-gray-600">{{ order.problem_description }}</p>
-                <h3 class="mt-2 text-sm font-bold text-gray-700">الإجراء المنفذ</h3>
-                <p class="text-sm text-gray-600">{{ order.repair_action || '-' }}</p>
-            </div>
-
-            <!-- قطع الغيار -->
-            <div v-if="order.parts && order.parts.length > 0" class="mt-4 border-t pt-4">
-                <h3 class="text-sm font-bold text-gray-700">قطع الغيار المستخدمة</h3>
-                <table class="mt-2 w-full text-sm">
-                    <thead>
-                        <tr class="border-b">
-                            <th class="text-right py-1">القطعة</th>
-                            <th class="text-center py-1">الكمية</th>
-                            <th class="text-left py-1">السعر</th>
-                            <th class="text-left py-1">الإجمالي</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="part in order.parts" :key="part.id" class="border-b">
-                            <td class="py-1">{{ part.product_name }}</td>
-                            <td class="text-center py-1">{{ part.quantity }}</td>
-                            <td class="py-1">{{ formatCurrency(part.unit_price) }}</td>
-                            <td class="py-1">{{ formatCurrency(part.total_price) }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- التكاليف -->
-            <div class="mt-4 border-t pt-4">
-                <div class="flex justify-between text-sm">
-                    <span>تكلفة الفحص</span>
-                    <span>{{ formatCurrency(order.inspection_fee) }}</span>
-                </div>
-                <div class="flex justify-between text-sm">
-                    <span>أجرة الصيانة</span>
-                    <span>{{ formatCurrency(order.labor_cost) }}</span>
-                </div>
-                <div class="flex justify-between text-sm">
-                    <span>قطع الغيار</span>
-                    <span>{{ formatCurrency(order.parts_cost) }}</span>
-                </div>
-                <div class="flex justify-between text-lg font-bold border-t pt-2 mt-2">
-                    <span>الإجمالي</span>
-                    <span>{{ formatCurrency(order.total_amount) }}</span>
-                </div>
-                <div class="flex justify-between text-sm mt-2">
-                    <span>المدفوع</span>
-                    <span>{{ formatCurrency(order.paid_amount) }}</span>
-                </div>
-                <div class="flex justify-between text-sm font-bold text-red-600">
-                    <span>المتبقي</span>
-                    <span>{{ formatCurrency(order.remaining_amount) }}</span>
-                </div>
-            </div>
-
-            <!-- ملاحظات -->
-            <div v-if="order.customer_notes" class="mt-4 border-t pt-4 text-sm">
-                <p class="font-bold">ملاحظات</p>
-                <p>{{ order.customer_notes }}</p>
-            </div>
-
-            <!-- التذييل -->
-            <div class="mt-6 border-t pt-4 text-center text-sm text-gray-500">
-                <p>شكراً لثقتكم بفنانة فون</p>
-                <p>هذه الفاتورة صادرة آلياً وتعتبر سنداً قانونياً</p>
-            </div>
-
-            <!-- زر الطباعة -->
-            <div class="mt-6 text-center print:hidden">
-                <button
-    type="button"
-    @click="printPage"
-    class="rounded-lg bg-blue-600 px-6 py-3 text-white transition hover:bg-blue-700"
->
-    طباعة الفاتورة
-</button>
-                <Link
-                    :href="route('repairs.show', order.id)"
-                    class="mr-3 rounded-lg border border-gray-300 px-6 py-3 text-gray-700 hover:bg-gray-50"
-                >
-                    العودة
-                </Link>
-            </div>
-        </div>
-    </div>
-</template>
-
 <script setup>
-import { Link } from '@inertiajs/vue3';
-import { usePrint } from '@/composables/usePrint';
+import { onMounted } from 'vue';
+import { Head } from '@inertiajs/vue3';
 
-const { printPage } = usePrint();
-
-const props = defineProps({
-    order: Object,
-});
-
-const formatCurrency = (value) => {
-    return Number(value || 0).toFixed(2) + ' شيكل';
-};
-
-const formatDate = (date) => {
-    if (!date) return '-';
-    return new Date(date).toLocaleDateString('ar-EG');
-};
+const props = defineProps({ order: { type: Object, required: true } });
+const money = value => `${Number(value || 0).toLocaleString('ar-PS', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} شيكل`;
+const date = value => value ? new Intl.DateTimeFormat('ar-PS', { dateStyle: 'medium' }).format(new Date(value)) : '—';
+onMounted(() => setTimeout(() => window.print(), 250));
 </script>
 
-<style>
-@page {
-    size: A4;
-    margin: 10mm;
-}
+<template>
+    <Head :title="`صيانة ${order.order_number}`" />
+    <main dir="rtl" class="mx-auto max-w-4xl bg-white p-8 text-slate-900 print:max-w-none print:p-0">
+        <header class="flex items-start justify-between border-b-2 border-slate-900 pb-5">
+            <div><h1 class="text-2xl font-black">فنانة فون</h1><p class="mt-1 text-sm text-slate-500">إيصال / تفاصيل طلب صيانة</p></div>
+            <div class="text-left"><strong dir="ltr" class="text-lg">{{ order.order_number }}</strong><p class="mt-1 text-xs text-slate-500">{{ date(order.received_at) }}</p></div>
+        </header>
 
-@media print {
-    html,
-    body {
-        margin: 0 !important;
-        padding: 0 !important;
-        background: #ffffff !important;
-    }
+        <section class="mt-6 grid grid-cols-2 gap-5 text-sm">
+            <div class="rounded-xl border border-slate-200 p-4"><p class="text-xs text-slate-500">العميل</p><strong class="mt-1 block">{{ order.customer_name }}</strong><p dir="ltr" class="mt-1 text-right">{{ order.customer_phone }}</p></div>
+            <div class="rounded-xl border border-slate-200 p-4"><p class="text-xs text-slate-500">الجهاز</p><strong class="mt-1 block">{{ order.brand }} {{ order.model }}</strong><p class="mt-1">{{ order.device_type }} · {{ order.color || '—' }}</p></div>
+        </section>
 
-    body {
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-    }
+        <section class="mt-5 grid gap-4 text-sm md:grid-cols-3">
+            <div><p class="font-black">المشكلة</p><p class="mt-2 leading-6">{{ order.problem_description }}</p></div>
+            <div><p class="font-black">التشخيص</p><p class="mt-2 leading-6">{{ order.inspection_result }}</p></div>
+            <div><p class="font-black">الإصلاح</p><p class="mt-2 leading-6">{{ order.repair_action }}</p></div>
+        </section>
 
-    .print\:bg-white {
-        background: #ffffff !important;
-    }
+        <section class="mt-6">
+            <h2 class="font-black">قطع الغيار</h2>
+            <table class="mt-3 w-full border-collapse text-sm">
+                <thead><tr class="bg-slate-100"><th class="border p-2 text-right">القطعة</th><th class="border p-2">المصدر</th><th class="border p-2">الكمية</th></tr></thead>
+                <tbody>
+                    <tr v-for="part in (order.parts || []).filter(p => p.is_committed)" :key="`s-${part.id}`"><td class="border p-2">{{ part.product_name }}</td><td class="border p-2 text-center">مخزن المحل</td><td class="border p-2 text-center">{{ part.quantity }}</td></tr>
+                    <tr v-for="part in (order.external_parts || []).filter(p => p.status === 'purchased')" :key="`e-${part.id}`"><td class="border p-2">{{ part.part_name }}</td><td class="border p-2 text-center">خارجي — {{ part.purchase_from }}</td><td class="border p-2 text-center">{{ part.quantity }}</td></tr>
+                    <tr v-if="!(order.parts || []).some(p => p.is_committed) && !(order.external_parts || []).some(p => p.status === 'purchased')"><td colspan="3" class="border p-4 text-center text-slate-500">لا توجد قطع غيار</td></tr>
+                </tbody>
+            </table>
+        </section>
 
-    .print\:shadow-none {
-        box-shadow: none !important;
-    }
+        <section class="mt-6 grid grid-cols-3 gap-3 text-sm">
+            <div class="rounded-xl bg-slate-100 p-4"><p class="text-xs text-slate-500">الإجمالي</p><strong class="mt-1 block">{{ money(order.total_amount) }}</strong></div>
+            <div class="rounded-xl bg-slate-100 p-4"><p class="text-xs text-slate-500">المدفوع</p><strong class="mt-1 block">{{ money(order.paid_amount) }}</strong></div>
+            <div class="rounded-xl bg-slate-100 p-4"><p class="text-xs text-slate-500">المتبقي</p><strong class="mt-1 block">{{ money(order.remaining_amount) }}</strong></div>
+        </section>
 
-    .print\:p-4 {
-        padding: 0 !important;
-    }
-
-    .print\:hidden {
-        display: none !important;
-    }
-
-    a {
-        text-decoration: none !important;
-    }
-
-    a[href]::after {
-        content: none !important;
-    }
-}
-</style>
+        <footer class="mt-10 border-t pt-5 text-center text-xs text-slate-500">شكراً لتعاملكم مع فنانة فون</footer>
+    </main>
+</template>

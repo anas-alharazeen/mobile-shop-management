@@ -6,6 +6,7 @@ enum TransactionType: string
 {
     case SALE_PAYMENT = 'sale_payment';
     case REPAIR_PAYMENT = 'repair_payment';
+    case REPAIR_PART_PURCHASE = 'repair_part_purchase';
     case PURCHASE_PAYMENT = 'purchase_payment';
     case SALES_REFUND = 'sales_refund';
     case PURCHASE_REFUND = 'purchase_refund';
@@ -21,6 +22,7 @@ enum TransactionType: string
         return match ($this) {
             self::SALE_PAYMENT => 'دفعة مبيعات',
             self::REPAIR_PAYMENT => 'دفعة صيانة',
+            self::REPAIR_PART_PURCHASE => 'شراء قطعة صيانة خارجية',
             self::PURCHASE_PAYMENT => 'دفعة مشتريات',
             self::SALES_REFUND => 'استرداد مرتجع مبيعات',
             self::PURCHASE_REFUND => 'استرداد مرتجع مشتريات',

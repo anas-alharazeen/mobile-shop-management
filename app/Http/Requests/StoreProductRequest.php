@@ -205,7 +205,12 @@ class StoreProductRequest extends FormRequest
             'opening_stocks.*.quantity' => [
                 'required',
                 'integer',
-                'min:1',
+                /*
+                 * 0 مسموح:
+                 * يعني المنتج موجود كرأس بيانات فقط
+                 * ولم يدخل المخزون بعد.
+                 */
+                'min:0',
                 'max:100000000',
             ],
 

@@ -361,9 +361,9 @@ const openingStockError =
                         row.quantity
                         || 0
                     )
-                ) < 1
+                ) < 0
             ) {
-                return 'الكمية الافتتاحية يجب أن تكون قطعة واحدة على الأقل.';
+                return 'الكمية الافتتاحية لا يمكن أن تكون سالبة.';
             }
         }
 
@@ -536,8 +536,12 @@ const addOpeningStockRow =
             warehouse_id:
                 warehouse.id,
 
+            /*
+             * المنتج الجديد لا يعني وجود قطعة فعلية.
+             * يبدأ الرصيد 0 ما لم يكتب المستخدم كمية افتتاحية حقيقية.
+             */
             quantity:
-                1,
+                0,
         });
     };
 
@@ -1458,7 +1462,7 @@ onBeforeUnmount(
                             <p
                                 class="mt-2 text-xs text-slate-500"
                             >
-                                سيتم إنشاء المنتج برصيد 0، ويمكن إدخاله لاحقاً عبر المشتريات أو المخزون.
+                                سيتم إنشاء المنتج برصيد 0. ويمكنك أيضاً إضافته مباشرة من شاشة فاتورة الشراء بدون الرجوع إلى قسم المنتجات.
                             </p>
                         </div>
 
@@ -1506,7 +1510,7 @@ onBeforeUnmount(
                                 <input
                                     v-model.number="row.quantity"
                                     type="number"
-                                    min="1"
+                                    min="0"
                                     step="1"
                                     class="w-full rounded-xl border-slate-300 bg-white text-sm font-black dark:border-slate-600 dark:bg-slate-800 dark:text-white"
                                 />

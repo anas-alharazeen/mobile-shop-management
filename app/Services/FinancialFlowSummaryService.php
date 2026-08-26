@@ -201,6 +201,13 @@ class FinancialFlowSummaryService
                 ] ?? 0.0
             );
 
+        $repairPartPurchases =
+            -(
+                $byType[
+                    TransactionType::REPAIR_PART_PURCHASE->value
+                ] ?? 0.0
+            );
+
         $salesRefunds =
             -(
                 $byType[
@@ -233,7 +240,8 @@ class FinancialFlowSummaryService
             $collectedSales
             + $collectedRepairs
             - $paidToSuppliers
-            - $expenses;
+            - $expenses
+            - $repairPartPurchases;
 
         return [
             'total_inflows' =>
@@ -282,6 +290,12 @@ class FinancialFlowSummaryService
             'expenses' =>
                 round(
                     $expenses,
+                    2
+                ),
+
+            'repair_part_purchases' =>
+                round(
+                    $repairPartPurchases,
                     2
                 ),
 

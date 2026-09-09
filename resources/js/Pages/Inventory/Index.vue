@@ -48,6 +48,11 @@ const props = defineProps({
         default: () => [],
     },
 
+    warehouseTypeSummary: {
+        type: Object,
+        default: () => ({}),
+    },
+
     recentMovements: {
         type: Array,
         default: () => [],
@@ -78,6 +83,9 @@ const filters = reactive({
 
     warehouse_id:
         props.filters?.warehouse_id || '',
+
+    warehouse_type:
+        props.filters?.warehouse_type || '',
 
     stock_status:
         props.filters?.stock_status || '',
@@ -233,8 +241,109 @@ const hasFilters = computed(() => Boolean(
     filters.search
     || filters.category_id
     || filters.warehouse_id
+    || filters.warehouse_type
     || filters.stock_status
 ));
+
+const activeWarehouseScope = computed(() =>
+    filters.warehouse_type
+    || enumValue(props.selectedWarehouse?.type)
+    || 'all'
+);
+
+const warehouseScopeCards = computed(() => {
+    const fallback = {
+        all: {
+            key: 'all',
+            label: 'كل المخزون',
+            description: 'المبيعات والصيانة معاً',
+            pieces: props.stats?.total_pieces || 0,
+            value: props.stats?.total_value || 0,
+            sku_count: props.stats?.products_with_stock || 0,
+        },
+        sales: {
+            key: 'sales',
+            label: 'مخزون المبيعات',
+            description: 'الأصناف المتاحة للبيع فعلياً',
+            pieces: 0,
+            value: props.stats?.sales_value || 0,
+            sku_count: 0,
+        },
+        maintenance: {
+            key: 'maintenance',
+            label: 'مخزون الصيانة',
+            description: 'القطع والأصناف المخصصة للصيانة',
+            pieces: 0,
+            value: props.stats?.maintenance_value || 0,
+            sku_count: 0,
+        },
+    };
+
+    return ['all', 'sales', 'maintenance'].map((key) => ({
+        ...fallback[key],
+        ...(props.warehouseTypeSummary?.[key] || {}),
+    }));
+});
+
+const activeWarehouseScopeSummary = computed(() =>
+    warehouseScopeCards.value.find(
+        (item) => item.key === activeWarehouseScope.value
+    ) || warehouseScopeCards.value[0]
+);
+
+const visibleWarehouseSummary = computed(() => {
+    if (activeWarehouseScope.value === 'all') {
+        return props.warehouseSummary;
+    }
+
+    return props.warehouseSummary.filter(
+        (warehouse) => enumValue(warehouse.type) === activeWarehouseScope.value
+    );
+});
+
+const visibleWarehouseOptions = computed(() => {
+    if (activeWarehouseScope.value === 'all') {
+        return props.warehouses;
+    }
+
+    return props.warehouses.filter(
+        (warehouse) => enumValue(warehouse.type) === activeWarehouseScope.value
+    );
+});
+
+const allWarehousesScopeLabel = computed(() =>
+    activeWarehouseScope.value === 'all'
+        ? 'كل المخازن'
+        : `كل مخازن ${activeWarehouseScopeSummary.value.label}`
+);
+
+const emptyInventoryTitle = computed(() => {
+    if (props.selectedWarehouse) {
+        return `لا توجد أصناف في ${props.selectedWarehouse.name}`;
+    }
+
+    if (activeWarehouseScope.value === 'sales') {
+        return 'لا توجد أصناف في مخزون المبيعات';
+    }
+
+    if (activeWarehouseScope.value === 'maintenance') {
+        return 'لا توجد أصناف في مخزون الصيانة';
+    }
+
+    return 'لا توجد منتجات مطابقة';
+});
+
+const emptyInventoryHint = computed(() =>
+    activeWarehouseScope.value === 'all'
+        ? 'جرّب تعديل البحث أو الفلاتر الحالية.'
+        : 'لا يوجد رصيد فعلي مطابق داخل هذا النطاق مع الفلاتر الحالية.'
+);
+
+const scopeIconPath = (scope) => ({
+    all: 'M4 7.5 12 3l8 4.5M4 7.5V17l8 4 8-4V7.5M4 7.5l8 4.5m8-4.5L12 12m0 0v9',
+    sales: 'M3 10h18M5 10l1-5h12l1 5M6 10v9h12v-9M9 14h6',
+    maintenance: 'M14.7 6.3a4 4 0 0 0-5 5L4 17l3 3 5.7-5.7a4 4 0 0 0 5-5l-2.4 2.4-3-3 2.4-2.4Z',
+}[scope] || 'M4 7.5 12 3l8 4.5M4 7.5V17l8 4 8-4V7.5');
 
 const statsCards = computed(() => [
     {
@@ -342,6 +451,9 @@ const applyFilters = () => {
             warehouse_id:
                 filters.warehouse_id || undefined,
 
+            warehouse_type:
+                filters.warehouse_type || undefined,
+
             stock_status:
                 filters.stock_status || undefined,
         },
@@ -360,11 +472,56 @@ const clearFilters = () => {
             search: '',
             category_id: '',
             warehouse_id: '',
+            warehouse_type: '',
             stock_status: '',
         }
     );
 
     applyFilters();
+};
+
+const selectWarehouseScope = (scope) => {
+    filters.warehouse_type =
+        scope === 'all'
+            ? ''
+            : scope;
+
+    // نوع المخزن هو مستوى أعلى من المخزن المحدد.
+    // عند تغييره نزيل التحديد الدقيق حتى لا تتعارض الفلاتر.
+    filters.warehouse_id = '';
+
+    applyFilters();
+};
+
+const selectWarehouseCard = (warehouse) => {
+    filters.warehouse_type =
+        enumValue(warehouse?.type);
+
+    filters.warehouse_id =
+        warehouse?.id || '';
+
+    applyFilters();
+};
+
+const showAllWarehousesInScope = () => {
+    filters.warehouse_id = '';
+    applyFilters();
+};
+
+const syncWarehouseScopeFromSelect = () => {
+    if (!filters.warehouse_id) {
+        return;
+    }
+
+    const warehouse = props.warehouses.find(
+        (item) =>
+            Number(item.id) === Number(filters.warehouse_id)
+    );
+
+    if (warehouse) {
+        filters.warehouse_type =
+            enumValue(warehouse.type);
+    }
 };
 
 /* =========================
@@ -1335,100 +1492,237 @@ watch(
             <!-- Warehouse distribution -->
             <section
                 v-if="warehouseSummary.length"
-                class="rounded-[26px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800"
+                class="relative overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800"
             >
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                        <h2
-                            class="font-black text-slate-950 dark:text-white"
-                        >
-                            توزيع المخزون حسب المخزن
-                        </h2>
+                <div
+                    class="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-l from-indigo-50 via-blue-50/70 to-transparent dark:from-indigo-950/20 dark:via-blue-950/10"
+                ></div>
 
-                        <p class="mt-1 text-xs text-slate-500">
-                            ملخص سريع للكميات والقيمة وعدد الأصناف الموجودة فعلياً.
-                        </p>
+                <div class="relative p-5 sm:p-6">
+                    <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                        <div class="flex items-start gap-3">
+                            <div
+                                class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-lg shadow-slate-950/10 dark:bg-white dark:text-slate-950"
+                            >
+                                <svg
+                                    class="h-6 w-6"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="1.8"
+                                        d="M4 7.5 12 3l8 4.5M4 7.5V17l8 4 8-4V7.5M4 7.5l8 4.5m8-4.5L12 12m0 0v9"
+                                    />
+                                </svg>
+                            </div>
+
+                            <div>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <h2 class="text-lg font-black text-slate-950 dark:text-white">
+                                        توزيع المخزون حسب الاستخدام
+                                    </h2>
+
+                                    <span
+                                        class="rounded-full bg-indigo-100 px-2.5 py-1 text-[10px] font-black text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300"
+                                    >
+                                        فصل فعلي للمخزون
+                                    </span>
+                                </div>
+
+                                <p class="mt-1.5 max-w-2xl text-xs leading-6 text-slate-500 dark:text-slate-400">
+                                    اختر عرض الكل أو مخزون المبيعات أو مخزون الصيانة. عند اختيار نوع محدد ستظهر فقط الأصناف الموجودة فعلياً برصيد داخل هذا النوع.
+                                </p>
+                            </div>
+                        </div>
+
+                        <Link
+                            :href="route('reports.inventory')"
+                            class="inline-flex items-center justify-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:text-indigo-300"
+                        >
+                            <svg
+                                class="h-4 w-4"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="1.8"
+                                    d="M4 19V9m5 10V5m5 14v-7m5 7V3"
+                                />
+                            </svg>
+                            تقرير المخزون
+                        </Link>
                     </div>
 
-                    <Link
-                        :href="route('reports.inventory')"
-                        class="text-xs font-black text-indigo-600 hover:underline dark:text-indigo-300"
-                    >
-                        فتح تقرير المخزون
-                    </Link>
-                </div>
+                    <!-- Main three scopes -->
+                    <div class="mt-6 grid gap-3 lg:grid-cols-3">
+                        <button
+                            v-for="scope in warehouseScopeCards"
+                            :key="scope.key"
+                            type="button"
+                            class="group relative overflow-hidden rounded-[24px] border p-4 text-right transition duration-200 sm:p-5"
+                            :class="
+                                activeWarehouseScope === scope.key
+                                    ? 'border-slate-950 bg-slate-950 text-white shadow-xl shadow-slate-950/10 dark:border-white dark:bg-white dark:text-slate-950'
+                                    : 'border-slate-200 bg-slate-50/80 text-slate-950 hover:-translate-y-0.5 hover:border-indigo-300 hover:bg-white hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/60 dark:text-white dark:hover:border-indigo-700 dark:hover:bg-slate-900'
+                            "
+                            @click="selectWarehouseScope(scope.key)"
+                        >
+                            <div class="flex items-start justify-between gap-4">
+                                <div class="min-w-0">
+                                    <div class="flex items-center gap-2">
+                                        <span
+                                            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl"
+                                            :class="
+                                                activeWarehouseScope === scope.key
+                                                    ? 'bg-white/10 dark:bg-slate-950/10'
+                                                    : scope.key === 'sales'
+                                                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
+                                                        : scope.key === 'maintenance'
+                                                            ? 'bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300'
+                                                            : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                                            "
+                                        >
+                                            <svg
+                                                class="h-5 w-5"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="1.8"
+                                                    :d="scopeIconPath(scope.key)"
+                                                />
+                                            </svg>
+                                        </span>
 
-                <div
-                    class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3"
-                >
-                    <button
-                        v-for="warehouse in warehouseSummary"
-                        :key="warehouse.id"
-                        type="button"
-                        class="rounded-2xl border p-4 text-right transition"
-                        :class="
-                            Number(filters.warehouse_id) === Number(warehouse.id)
-                                ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-500/10 dark:border-blue-700 dark:bg-blue-950/20'
-                                : 'border-slate-200 bg-slate-50 hover:border-blue-200 hover:bg-white dark:border-slate-700 dark:bg-slate-900/50'
-                        "
-                        @click="
-                            filters.warehouse_id = warehouse.id;
-                            applyFilters();
-                        "
-                    >
-                        <div class="flex items-start justify-between gap-3">
-                            <div>
+                                        <div class="min-w-0">
+                                            <h3 class="font-black">
+                                                {{ scope.label }}
+                                            </h3>
+                                            <p
+                                                class="mt-0.5 truncate text-[10px]"
+                                                :class="activeWarehouseScope === scope.key ? 'opacity-65' : 'text-slate-500 dark:text-slate-400'"
+                                            >
+                                                {{ scope.description }}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <span
-                                    class="rounded-lg bg-white px-2 py-1 text-[10px] font-black text-slate-500 shadow-sm dark:bg-slate-800"
+                                    v-if="activeWarehouseScope === scope.key"
+                                    class="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-black dark:bg-slate-950/10"
                                 >
-                                    {{ warehouse.type_label }}
+                                    {{ filters.warehouse_id ? 'نوع المخزن' : 'العرض الحالي' }}
                                 </span>
+                            </div>
 
-                                <h3
-                                    class="mt-2 font-black text-slate-950 dark:text-white"
+                            <div class="mt-5 grid grid-cols-3 gap-2">
+                                <div
+                                    class="rounded-2xl p-3"
+                                    :class="activeWarehouseScope === scope.key ? 'bg-white/10 dark:bg-slate-950/10' : 'bg-white dark:bg-slate-800'"
+                                >
+                                    <p
+                                        class="text-[9px] font-bold"
+                                        :class="activeWarehouseScope === scope.key ? 'opacity-60' : 'text-slate-400'"
+                                    >
+                                        القطع
+                                    </p>
+                                    <strong dir="ltr" class="mt-1 block text-right text-sm font-black">
+                                        {{ number(scope.pieces) }}
+                                    </strong>
+                                </div>
+
+                                <div
+                                    class="rounded-2xl p-3"
+                                    :class="activeWarehouseScope === scope.key ? 'bg-white/10 dark:bg-slate-950/10' : 'bg-white dark:bg-slate-800'"
+                                >
+                                    <p
+                                        class="text-[9px] font-bold"
+                                        :class="activeWarehouseScope === scope.key ? 'opacity-60' : 'text-slate-400'"
+                                    >
+                                        الأصناف
+                                    </p>
+                                    <strong dir="ltr" class="mt-1 block text-right text-sm font-black">
+                                        {{ number(scope.sku_count) }}
+                                    </strong>
+                                </div>
+
+                                <div
+                                    class="rounded-2xl p-3"
+                                    :class="activeWarehouseScope === scope.key ? 'bg-white/10 dark:bg-slate-950/10' : 'bg-white dark:bg-slate-800'"
+                                >
+                                    <p
+                                        class="text-[9px] font-bold"
+                                        :class="activeWarehouseScope === scope.key ? 'opacity-60' : 'text-slate-400'"
+                                    >
+                                        القيمة
+                                    </p>
+                                    <strong dir="ltr" class="mt-1 block truncate text-right text-[11px] font-black">
+                                        {{ money(scope.value) }}
+                                    </strong>
+                                </div>
+                            </div>
+                        </button>
+                    </div>
+
+                    <!-- Exact warehouses inside selected scope -->
+                    <div
+                        v-if="visibleWarehouseSummary.length"
+                        class="mt-4 rounded-[22px] border border-slate-200 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+                    >
+                        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                            <div>
+                                <p class="text-xs font-black text-slate-800 dark:text-slate-100">
+                                    عرض أدق حسب المخزن
+                                </p>
+                                <p class="mt-0.5 text-[10px] text-slate-400">
+                                    اختياري — استخدمه إذا كان لديك أكثر من مخزن داخل نفس النوع.
+                                </p>
+                            </div>
+
+                            <div class="flex flex-wrap gap-2">
+                                <button
+                                    type="button"
+                                    class="rounded-xl border px-3 py-2 text-[10px] font-black transition"
+                                    :class="
+                                        !filters.warehouse_id
+                                            ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-300'
+                                            : 'border-slate-200 bg-white text-slate-500 hover:border-indigo-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                                    "
+                                    @click="showAllWarehousesInScope"
+                                >
+                                    {{ allWarehousesScopeLabel }}
+                                </button>
+
+                                <button
+                                    v-for="warehouse in visibleWarehouseSummary"
+                                    :key="warehouse.id"
+                                    type="button"
+                                    class="rounded-xl border px-3 py-2 text-[10px] font-black transition"
+                                    :class="
+                                        Number(filters.warehouse_id) === Number(warehouse.id)
+                                            ? 'border-slate-950 bg-slate-950 text-white shadow-sm dark:border-white dark:bg-white dark:text-slate-950'
+                                            : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                                    "
+                                    @click="selectWarehouseCard(warehouse)"
                                 >
                                     {{ warehouse.name }}
-                                </h3>
-                            </div>
-
-                            <strong
-                                dir="ltr"
-                                class="text-sm text-blue-600 dark:text-blue-300"
-                            >
-                                {{ number(warehouse.pieces) }}
-                            </strong>
-                        </div>
-
-                        <div class="mt-4 grid grid-cols-2 gap-2">
-                            <div
-                                class="rounded-xl bg-white p-3 dark:bg-slate-800"
-                            >
-                                <p class="text-[10px] text-slate-400">
-                                    القيمة
-                                </p>
-                                <strong
-                                    dir="ltr"
-                                    class="mt-1 block text-right text-xs"
-                                >
-                                    {{ money(warehouse.value) }}
-                                </strong>
-                            </div>
-
-                            <div
-                                class="rounded-xl bg-white p-3 dark:bg-slate-800"
-                            >
-                                <p class="text-[10px] text-slate-400">
-                                    الأصناف
-                                </p>
-                                <strong
-                                    dir="ltr"
-                                    class="mt-1 block text-right text-xs"
-                                >
-                                    {{ number(warehouse.sku_count) }}
-                                </strong>
+                                    <span dir="ltr" class="mr-1 opacity-60">
+                                        · {{ number(warehouse.pieces) }}
+                                    </span>
+                                </button>
                             </div>
                         </div>
-                    </button>
+                    </div>
                 </div>
             </section>
 
@@ -1483,13 +1777,14 @@ watch(
                     <select
                         v-model="filters.warehouse_id"
                         class="rounded-xl border-slate-300 bg-white text-sm dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+                        @change="syncWarehouseScopeFromSelect"
                     >
                         <option value="">
                             جميع المخازن
                         </option>
 
                         <option
-                            v-for="warehouse in warehouses"
+                            v-for="warehouse in visibleWarehouseOptions"
                             :key="warehouse.id"
                             :value="warehouse.id"
                         >
@@ -1536,17 +1831,33 @@ watch(
                 </div>
 
                 <div
-                    v-if="selectedWarehouse"
-                    class="mt-3 flex items-center gap-2 rounded-xl bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:bg-blue-950/20 dark:text-blue-300"
+                    v-if="selectedWarehouse || filters.warehouse_type"
+                    class="mt-3 flex items-start gap-2 rounded-xl bg-blue-50 px-3 py-2.5 text-xs leading-5 text-blue-700 dark:bg-blue-950/20 dark:text-blue-300"
                 >
-                    <span class="font-black">
-                        تنبيه:
-                    </span>
-                    حالة المخزون المعروضة الآن محسوبة بالنسبة إلى
-                    <strong>
-                        {{ selectedWarehouse.name }}
-                    </strong>
-                    فقط.
+                    <svg
+                        class="mt-0.5 h-4 w-4 shrink-0"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="1.8"
+                            d="M12 9v4m0 4h.01M10.3 4.3 2.6 18a1.5 1.5 0 0 0 1.3 2.25h16.2A1.5 1.5 0 0 0 21.4 18L13.7 4.3a1.95 1.95 0 0 0-3.4 0Z"
+                        />
+                    </svg>
+
+                    <p>
+                        <span class="font-black">نطاق العرض الحالي:</span>
+                        <strong v-if="selectedWarehouse">
+                            {{ selectedWarehouse.name }}
+                        </strong>
+                        <strong v-else>
+                            {{ activeWarehouseScopeSummary.label }}
+                        </strong>.
+                        حالة المخزون والقيمة في جدول المنتجات تُحسب وفق هذا النطاق، وتظهر الأصناف الموجودة فعلياً فيه.
+                    </p>
                 </div>
             </section>
 
@@ -1561,14 +1872,23 @@ watch(
                         class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-700 sm:flex-row sm:items-center sm:justify-between"
                     >
                         <div>
-                            <h2
-                                class="font-black text-slate-950 dark:text-white"
-                            >
-                                أرصدة المنتجات
-                            </h2>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <h2
+                                    class="font-black text-slate-950 dark:text-white"
+                                >
+                                    أرصدة المنتجات
+                                </h2>
+
+                                <span
+                                    v-if="filters.warehouse_type || selectedWarehouse"
+                                    class="rounded-lg bg-indigo-50 px-2 py-1 text-[10px] font-black text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-300"
+                                >
+                                    {{ selectedWarehouse?.name || activeWarehouseScopeSummary.label }}
+                                </span>
+                            </div>
 
                             <p class="mt-1 text-xs text-slate-500">
-                                {{ number(products.total) }} منتج مطابق للفلاتر
+                                {{ number(products.total) }} صنف مطابق لنطاق العرض والفلاتر الحالية
                             </p>
                         </div>
 
@@ -1876,11 +2196,11 @@ watch(
                                             <h3
                                                 class="mt-4 font-black text-slate-800 dark:text-slate-100"
                                             >
-                                                لا توجد منتجات مطابقة
+                                                {{ emptyInventoryTitle }}
                                             </h3>
 
                                             <p class="mt-2 text-sm text-slate-500">
-                                                جرّب تعديل البحث أو الفلاتر الحالية.
+                                                {{ emptyInventoryHint }}
                                             </p>
                                         </div>
                                     </td>

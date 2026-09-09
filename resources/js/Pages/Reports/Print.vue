@@ -222,7 +222,9 @@ const summaryCards = computed(() => {
             ['مقبوضات الصيانة', money(summary.collected_repairs), 'دفعات الصيانة'],
             ['المدفوع للموردين', money(summary.paid_to_suppliers), 'دفعات المشتريات'],
             ['المصروفات', money(summary.expenses), 'مصروفات معتمدة'],
-            ['صافي التدفق', money(summary.net_cash_flow), 'المقبوضات - المدفوعات'],
+            ['صافي التدفق', money(summary.net_cash_flow), 'لا يشمل التحويلات الداخلية'],
+            ['حجم التحويلات', money(summary.transfer_volume), 'نقل داخلي بين الحسابات'],
+            ['عدد التحويلات', number(summary.transfer_count), 'تحويل مكتمل'],
             ['مستحقات العملاء', money(summary.customer_debts), 'ديون العملاء والصيانة'],
             ['مستحقات الموردين', money(summary.supplier_debts), 'ديون الموردين'],
         ],
@@ -277,12 +279,22 @@ const directionLabel = (value) => ({
 const transactionTypeLabel = (value) => ({
     sale_payment: 'دفعة مبيعات',
     repair_payment: 'دفعة صيانة',
+    repair_part_purchase: 'شراء قطعة صيانة خارجية',
     purchase_payment: 'دفعة مشتريات',
+    sales_refund: 'استرداد مرتجع مبيعات',
+    purchase_refund: 'استرداد مرتجع مشتريات',
+    exchange_difference: 'تسوية فرق استبدال',
     expense: 'مصروف',
     manual_deposit: 'إيداع يدوي',
     manual_withdrawal: 'سحب يدوي',
     balance_adjustment: 'تسوية رصيد',
+    account_transfer: 'تحويل بين الحسابات',
     reversal: 'عكس حركة',
+}[enumValue(value)] || enumValue(value) || 'غير محدد');
+
+const transferStatusLabel = (value) => ({
+    posted: 'مكتمل',
+    cancelled: 'ملغي',
 }[enumValue(value)] || enumValue(value) || 'غير محدد');
 
 const stockStatusLabel = (value) => ({
@@ -1101,12 +1113,52 @@ const backHref = computed(() => {
                     </section>
 
                     <section
-                        v-if="data.transactions?.length"
+                        v-if="data.transfers?.length"
                         class="report-section"
                     >
                         <div class="section-title-row">
                             <div>
                                 <span class="section-index">03</span>
+                                <h2>التحويلات بين الحسابات</h2>
+                                <p>حركات نقل داخلية لا تغيّر إجمالي أموال المحل ولا تدخل ضمن صافي التدفق العام.</p>
+                            </div>
+
+                            <div class="section-chip">{{ data.transfers.length }} تحويل</div>
+                        </div>
+
+                        <div class="table-shell">
+                            <table class="report-table">
+                                <thead>
+                                    <tr>
+                                        <th>رقم التحويل</th>
+                                        <th>من حساب</th>
+                                        <th>إلى حساب</th>
+                                        <th>المبلغ</th>
+                                        <th>التاريخ</th>
+                                        <th>الحالة</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="transfer in data.transfers" :key="transfer.id">
+                                        <td dir="ltr"><strong>{{ transfer.transfer_number }}</strong></td>
+                                        <td>{{ transfer.from_account?.name || '—' }}</td>
+                                        <td>{{ transfer.to_account?.name || '—' }}</td>
+                                        <td><strong>{{ money(transfer.amount) }}</strong></td>
+                                        <td>{{ formatDateTime(transfer.transfer_date) }}</td>
+                                        <td>{{ transferStatusLabel(transfer.status) }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <section
+                        v-if="data.transactions?.length"
+                        class="report-section"
+                    >
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-index">{{ data.transfers?.length ? '04' : '03' }}</span>
                                 <h2>الحركات المالية التفصيلية</h2>
                                 <p>جميع الحركات الواردة والصادرة المطابقة للفترة.</p>
                             </div>
@@ -1151,7 +1203,7 @@ const backHref = computed(() => {
                     <section class="report-section">
                         <div class="section-title-row">
                             <div>
-                                <span class="section-index">{{ data.transactions?.length ? '04' : '03' }}</span>
+                                <span class="section-index">{{ data.transfers?.length && data.transactions?.length ? '05' : (data.transfers?.length || data.transactions?.length ? '04' : '03') }}</span>
                                 <h2>الديون والإغلاقات اليومية</h2>
                                 <p>أعمار ديون العملاء ونتائج الإغلاق المالي.</p>
                             </div>

@@ -10,15 +10,17 @@
                         إدارة مصروفات المعرض اليومية
                     </p>
                 </div>
-                <button
-                    @click="openExpenseModal"
-                    class="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-red-700 hover:shadow-md"
+                <Link
+                    :href="route('finance.expenses.create')"
+                    class="group inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-slate-950/10 transition hover:-translate-y-0.5 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-500"
                 >
-                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                    </svg>
-                    إضافة مصروف
-                </button>
+                    <span class="flex h-7 w-7 items-center justify-center rounded-xl bg-white/10">
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                        </svg>
+                    </span>
+                    تسجيل مصروف جديد
+                </Link>
             </div>
         </template>
 
@@ -206,133 +208,6 @@
             </div>
         </div>
 
-        <!-- Modal إضافة مصروف -->
-        <Modal :show="expenseModal.show" @close="expenseModal.show = false">
-            <template #title>تسجيل مصروف جديد</template>
-            <template #content>
-                <form @submit.prevent="submitExpense" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            التصنيف <span class="text-red-500">*</span>
-                        </label>
-                        <select
-                            v-model="expenseForm.expense_category_id"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            required
-                        >
-                            <option value="">اختر التصنيف</option>
-                            <option v-for="cat in categories" :key="cat.id" :value="cat.id">
-                                {{ cat.name }}
-                            </option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            الحساب المالي <span class="text-red-500">*</span>
-                        </label>
-                        <select
-                            v-model="expenseForm.financial_account_id"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            required
-                        >
-                            <option value="">اختر الحساب</option>
-                            <option v-for="account in accounts" :key="account.id" :value="account.id">
-                                {{ account.name }}
-                            </option>
-                        </select>
-                    </div>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                                المبلغ <span class="text-red-500">*</span>
-                            </label>
-                            <input
-                                v-model.number="expenseForm.amount"
-                                type="number"
-                                step="0.01"
-                                min="0.01"
-                                class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                                required
-                            />
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                                التاريخ <span class="text-red-500">*</span>
-                            </label>
-                            <input
-                                v-model="expenseForm.expense_date"
-                                type="date"
-                                class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                                required
-                            />
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            المستفيد
-                        </label>
-                        <input
-                            v-model="expenseForm.beneficiary"
-                            type="text"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            placeholder="اسم المستفيد"
-                        />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            الوصف <span class="text-red-500">*</span>
-                        </label>
-                        <textarea
-                            v-model="expenseForm.description"
-                            rows="2"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            placeholder="وصف المصروف"
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            ملاحظات
-                        </label>
-                        <textarea
-                            v-model="expenseForm.notes"
-                            rows="2"
-                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
-                            placeholder="ملاحظات إضافية"
-                        />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            مرفق
-                        </label>
-                        <input
-                            type="file"
-                            accept=".jpg,.jpeg,.png,.webp,.pdf"
-                            class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100 dark:text-gray-400 dark:file:bg-blue-900/30 dark:file:text-blue-400"
-                            @change="handleAttachment"
-                        />
-                        <p class="mt-1 text-xs text-gray-400">JPG, PNG, WebP, PDF - حتى 5MB</p>
-                    </div>
-                    <div class="flex justify-end gap-3">
-                        <button
-                            type="button"
-                            @click="expenseModal.show = false"
-                            class="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
-                        >
-                            إلغاء
-                        </button>
-                        <button
-                            type="submit"
-                            :disabled="expenseForm.processing"
-                            class="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-70"
-                        >
-                            {{ expenseForm.processing ? 'جاري الحفظ...' : 'تسجيل المصروف' }}
-                        </button>
-                    </div>
-                </form>
-            </template>
-        </Modal>
-
         <!-- Modal إلغاء مصروف -->
         <Modal :show="cancelModal.show" @close="cancelModal.show = false">
             <template #title>إلغاء المصروف</template>
@@ -400,19 +275,9 @@ const filters = reactive({
     end_date: props.filters.end_date || '',
 });
 
-const expenseModal = ref({ show: false });
 const cancelModal = ref({ show: false, expense: null });
 
-const expenseForm = useForm({
-    expense_category_id: '',
-    financial_account_id: '',
-    amount: '',
-    expense_date: new Date().toISOString().split('T')[0],
-    beneficiary: '',
-    description: '',
-    notes: '',
-    attachment: null,
-});
+
 
 const cancelForm = useForm({
     reason: '',
@@ -438,35 +303,6 @@ const clearFilters = () => {
     filters.start_date = '';
     filters.end_date = '';
     applyFilters();
-};
-
-const openExpenseModal = () => {
-    expenseModal.value.show = true;
-    expenseForm.reset();
-    expenseForm.expense_date = new Date().toISOString().split('T')[0];
-};
-
-const handleAttachment = (event) => {
-    expenseForm.attachment = event.target.files[0];
-};
-
-const submitExpense = () => {
-    const formData = new FormData();
-    Object.keys(expenseForm.data()).forEach(key => {
-        if (key === 'attachment' && expenseForm.attachment) {
-            formData.append('attachment', expenseForm.attachment);
-        } else {
-            formData.append(key, expenseForm[key]);
-        }
-    });
-
-    expenseForm.post(route('finance.store-expense'), {
-        data: formData,
-        preserveScroll: true,
-        onSuccess: () => {
-            expenseModal.value.show = false;
-        },
-    });
 };
 
 const openCancelModal = (expense) => {

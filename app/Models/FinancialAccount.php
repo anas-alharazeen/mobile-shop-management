@@ -6,6 +6,7 @@ use App\Enums\AccountType;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class FinancialAccount extends Model
 {
@@ -17,7 +18,12 @@ class FinancialAccount extends Model
         'opening_balance',
         'current_balance',
         'description',
+        'logo_path',
         'is_active',
+    ];
+
+    protected $appends = [
+        'logo_url',
     ];
 
     protected $casts = [
@@ -30,6 +36,16 @@ class FinancialAccount extends Model
     public function transactions()
     {
         return $this->hasMany(FinancialTransaction::class);
+    }
+
+    public function outgoingTransfers()
+    {
+        return $this->hasMany(FinancialTransfer::class, 'from_account_id');
+    }
+
+    public function incomingTransfers()
+    {
+        return $this->hasMany(FinancialTransfer::class, 'to_account_id');
     }
 
     public function expenses()
@@ -50,6 +66,16 @@ class FinancialAccount extends Model
     public function getTypeLabelAttribute()
     {
         return $this->type?->label() ?? $this->type;
+    }
+
+
+    public function getLogoUrlAttribute(): ?string
+    {
+        if (! $this->logo_path) {
+            return null;
+        }
+
+        return Storage::disk('public')->url($this->logo_path);
     }
 
     public function getFormattedBalanceAttribute()

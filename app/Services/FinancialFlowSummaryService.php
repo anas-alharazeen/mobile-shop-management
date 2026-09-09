@@ -108,18 +108,6 @@ class FinancialFlowSummaryService
                     ? $amount
                     : -$amount;
 
-            if (
-                $direction
-                === TransactionDirection::INFLOW->value
-            ) {
-                $totalInflows += $amount;
-            } else {
-                $totalOutflows += $amount;
-            }
-
-            $netCashFlow +=
-                $signedAmount;
-
             $effectiveType =
                 $this->typeValue(
                     $transaction
@@ -155,6 +143,33 @@ class FinancialFlowSummaryService
                             $originalType;
                     }
                 }
+            }
+
+            /*
+             * التحويل بين حسابين تابعين للمحل لا يمثل دخلاً أو مصروفاً
+             * على مستوى المنشأة. يظهر في كشف كل حساب، لكن نستبعد طرفيه
+             * من إجمالي الوارد/الصادر وصافي التدفق العام حتى لا تتضخم
+             * الأرقام لمجرد نقل المال من صندوق إلى بنك أو العكس.
+             *
+             * عكس التحويل يرث ACCOUNT_TRANSFER من الحركة الأصلية، لذلك
+             * يُستبعد أيضاً من التدفق العام مع بقائه محفوظاً في الـLedger.
+             */
+            $isInternalTransfer =
+                $effectiveType
+                === TransactionType::ACCOUNT_TRANSFER->value;
+
+            if (! $isInternalTransfer) {
+                if (
+                    $direction
+                    === TransactionDirection::INFLOW->value
+                ) {
+                    $totalInflows += $amount;
+                } else {
+                    $totalOutflows += $amount;
+                }
+
+                $netCashFlow +=
+                    $signedAmount;
             }
 
             if (

@@ -346,6 +346,31 @@
                     </Link>
                 </li>
 
+                <!-- التحويلات بين الحسابات -->
+                <li>
+                    <Link
+                        :href="route('finance.transfers')"
+                        :class="[
+                            'flex items-center rounded-lg px-4 py-3 transition-colors',
+                            route().current('finance.transfers')
+                                ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-400'
+                                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700',
+                            isCollapsed && !isMobile ? 'justify-center' : 'gap-3',
+                        ]"
+                        @click="closeMobile"
+                    >
+                        <svg class="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4 4 4m6 0v12m0 0 4-4m-4 4-4-4" />
+                        </svg>
+                        <span
+                            v-if="!(isCollapsed && !isMobile)"
+                            class="text-sm font-medium"
+                        >
+                            تحويلات الحسابات
+                        </span>
+                    </Link>
+                </li>
+
                 <!-- المصروفات -->
                 <li>
                     <Link

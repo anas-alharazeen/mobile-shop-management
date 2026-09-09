@@ -2,9 +2,11 @@
 
 namespace App\Services\Reports;
 
+use App\Enums\FinancialTransferStatus;
 use App\Models\DailyAccountClosing;
 use App\Models\FinancialAccount;
 use App\Models\FinancialTransaction;
+use App\Models\FinancialTransfer;
 use App\Models\PurchaseInvoice;
 use App\Models\RepairOrder;
 use App\Models\SalesInvoice;
@@ -229,6 +231,45 @@ class FinanceReportService
             ->sum('difference');
 
         /*
+         * التحويلات الداخلية بين الحسابات ضمن الفترة.
+         * نعرضها في قسم مستقل للتدقيق، لكن لا ندخلها ضمن إجمالي
+         * الوارد أو الصادر العام لأنها لا تغيّر إجمالي أموال المحل.
+         */
+        $transfers = FinancialTransfer::query()
+            ->with(['fromAccount', 'toAccount'])
+            ->when(
+                ! empty($resolvedFilters['start_date']),
+                fn ($query) => $query->whereDate(
+                    'transfer_date',
+                    '>=',
+                    $resolvedFilters['start_date']
+                )
+            )
+            ->when(
+                ! empty($resolvedFilters['end_date']),
+                fn ($query) => $query->whereDate(
+                    'transfer_date',
+                    '<=',
+                    $resolvedFilters['end_date']
+                )
+            )
+            ->orderByDesc('transfer_date')
+            ->orderByDesc('id')
+            ->get();
+
+        $postedTransfers = $transfers->filter(
+            fn (FinancialTransfer $transfer): bool =>
+                $transfer->status === FinancialTransferStatus::POSTED
+        );
+
+        $transferVolume = (float) $postedTransfers->sum('amount');
+        $transferCount = $postedTransfers->count();
+        $cancelledTransferCount = $transfers->filter(
+            fn (FinancialTransfer $transfer): bool =>
+                $transfer->status === FinancialTransferStatus::CANCELLED
+        )->count();
+
+        /*
          * الحركات المالية التفصيلية.
          *
          * هذا هو الجزء المطلوب للطباعة الجديدة،
@@ -339,6 +380,17 @@ class FinanceReportService
                         'reversal_count'
                     ],
 
+                'transfer_volume' => round(
+                    $transferVolume,
+                    2
+                ),
+
+                'transfer_count' =>
+                    $transferCount,
+
+                'cancelled_transfer_count' =>
+                    $cancelledTransferCount,
+
                 'customer_debts' => round(
                     $totalCustomerDebts,
                     2
@@ -369,6 +421,9 @@ class FinanceReportService
 
             'closings' =>
                 $closings,
+
+            'transfers' =>
+                $transfers,
 
             'transactions' =>
                 $transactions,

@@ -15,6 +15,7 @@ enum TransactionType: string
     case MANUAL_DEPOSIT = 'manual_deposit';
     case MANUAL_WITHDRAWAL = 'manual_withdrawal';
     case BALANCE_ADJUSTMENT = 'balance_adjustment';
+    case ACCOUNT_TRANSFER = 'account_transfer';
     case REVERSAL = 'reversal';
 
     public function label(): string
@@ -31,6 +32,7 @@ enum TransactionType: string
             self::MANUAL_DEPOSIT => 'إيداع يدوي',
             self::MANUAL_WITHDRAWAL => 'سحب يدوي',
             self::BALANCE_ADJUSTMENT => 'تسوية رصيد',
+            self::ACCOUNT_TRANSFER => 'تحويل بين الحسابات',
             self::REVERSAL => 'عكس حركة',
         };
     }

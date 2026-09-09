@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\Warehouse;
 use App\Services\InventoryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 class InventoryTest extends TestCase
@@ -676,6 +677,147 @@ class InventoryTest extends TestCase
             'warehouse_id' => $this->maintenanceWarehouse->id,
             'quantity' => 5,
         ]);
+    }
+
+    // ========== اختبارات فصل مخزون المبيعات والصيانة ==========
+
+    /** @test */
+    public function inventory_can_filter_products_by_sales_stock_only()
+    {
+        $maintenanceOnly = Product::create([
+            'name' => 'Maintenance Part',
+            'code' => 'MAIN-ONLY-001',
+            'category_id' => $this->category->id,
+            'purchase_price' => 120,
+            'selling_price' => 180,
+            'low_stock_threshold' => 2,
+            'is_active' => true,
+        ]);
+
+        $this->inventoryService->addStock(
+            $this->product,
+            $this->salesWarehouse,
+            8,
+            'رصيد مبيعات'
+        );
+
+        $this->inventoryService->addStock(
+            $maintenanceOnly,
+            $this->maintenanceWarehouse,
+            4,
+            'رصيد صيانة'
+        );
+
+        $response = $this->actingAs($this->user)
+            ->get(route('inventory.index', [
+                'warehouse_type' => 'sales',
+            ]));
+
+        $response->assertOk();
+
+        $response->assertInertia(fn (Assert $page) =>
+            $page
+                ->component('Inventory/Index')
+                ->where('filters.warehouse_type', 'sales')
+                ->has('products.data', 1)
+                ->where('products.data.0.id', $this->product->id)
+                ->where('products.data.0.sales_stock', 8)
+                ->where('products.data.0.maintenance_stock', 0)
+                ->where('products.data.0.display_stock', 8)
+                ->where('warehouseTypeSummary.sales.pieces', 8)
+                ->where('warehouseTypeSummary.sales.sku_count', 1)
+        );
+    }
+
+    /** @test */
+    public function inventory_can_filter_products_by_maintenance_stock_only()
+    {
+        $salesOnly = Product::create([
+            'name' => 'Sales Only Product',
+            'code' => 'SALES-ONLY-001',
+            'category_id' => $this->category->id,
+            'purchase_price' => 500,
+            'selling_price' => 700,
+            'low_stock_threshold' => 2,
+            'is_active' => true,
+        ]);
+
+        $this->inventoryService->addStock(
+            $salesOnly,
+            $this->salesWarehouse,
+            7,
+            'رصيد مبيعات'
+        );
+
+        $this->inventoryService->addStock(
+            $this->product,
+            $this->maintenanceWarehouse,
+            3,
+            'رصيد صيانة'
+        );
+
+        $response = $this->actingAs($this->user)
+            ->get(route('inventory.index', [
+                'warehouse_type' => 'maintenance',
+            ]));
+
+        $response->assertOk();
+
+        $response->assertInertia(fn (Assert $page) =>
+            $page
+                ->component('Inventory/Index')
+                ->where('filters.warehouse_type', 'maintenance')
+                ->has('products.data', 1)
+                ->where('products.data.0.id', $this->product->id)
+                ->where('products.data.0.sales_stock', 0)
+                ->where('products.data.0.maintenance_stock', 3)
+                ->where('products.data.0.display_stock', 3)
+                ->where('warehouseTypeSummary.maintenance.pieces', 3)
+                ->where('warehouseTypeSummary.maintenance.sku_count', 1)
+        );
+    }
+
+    /** @test */
+    public function exact_warehouse_filter_does_not_return_products_without_stock_in_that_warehouse()
+    {
+        $maintenanceOnly = Product::create([
+            'name' => 'Repair Battery',
+            'code' => 'REP-BAT-001',
+            'category_id' => $this->category->id,
+            'purchase_price' => 90,
+            'selling_price' => 130,
+            'low_stock_threshold' => 2,
+            'is_active' => true,
+        ]);
+
+        $this->inventoryService->addStock(
+            $this->product,
+            $this->salesWarehouse,
+            5,
+            'رصيد مبيعات'
+        );
+
+        $this->inventoryService->addStock(
+            $maintenanceOnly,
+            $this->maintenanceWarehouse,
+            6,
+            'رصيد صيانة'
+        );
+
+        $response = $this->actingAs($this->user)
+            ->get(route('inventory.index', [
+                'warehouse_id' => $this->salesWarehouse->id,
+                'warehouse_type' => 'sales',
+            ]));
+
+        $response->assertOk();
+
+        $response->assertInertia(fn (Assert $page) =>
+            $page
+                ->has('products.data', 1)
+                ->where('products.data.0.id', $this->product->id)
+                ->where('products.data.0.filtered_warehouse_stock', 5)
+        );
     }
 
     // ========== اختبارات الإحصائيات ==========

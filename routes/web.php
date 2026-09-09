@@ -187,14 +187,19 @@ Route::middleware('auth')->group(function () {
     */
     Route::get('/finance', [FinanceController::class, 'index'])->name('finance.index');
     Route::post('/finance/accounts', [FinanceController::class, 'storeAccount'])->name('finance.store-account');
+    Route::post('/finance/accounts/{financialAccount}', [FinanceController::class, 'updateAccount'])->name('finance.update-account');
     Route::patch('/finance/accounts/{financialAccount}/status', [FinanceController::class, 'toggleAccountStatus'])->name('finance.toggle-account');
     Route::get('/finance/accounts/{financialAccount}/print', [FinanceController::class, 'printAccount'])->name('finance.print-account');
     Route::get('/finance/accounts/{financialAccount}', [FinanceController::class, 'showAccount'])->name('finance.show-account');
     Route::post('/finance/sync-payments', [FinanceController::class, 'syncPayments'])->name('finance.sync-payments');
     Route::get('/finance/expenses', [FinanceController::class, 'expenses'])->name('finance.expenses');
+    Route::get('/finance/expenses/create', [FinanceController::class, 'createExpense'])->name('finance.expenses.create');
     Route::post('/finance/expenses', [FinanceController::class, 'storeExpense'])->name('finance.store-expense');
     Route::post('/finance/expenses/{expense}/cancel', [FinanceController::class, 'cancelExpense'])->name('finance.cancel-expense');
     Route::post('/finance/manual-transaction', [FinanceController::class, 'manualTransaction'])->name('finance.manual-transaction');
+    Route::get('/finance/transfers', [FinanceController::class, 'transfers'])->name('finance.transfers');
+    Route::post('/finance/transfers', [FinanceController::class, 'storeTransfer'])->name('finance.store-transfer');
+    Route::post('/finance/transfers/{financialTransfer}/cancel', [FinanceController::class, 'cancelTransfer'])->name('finance.cancel-transfer');
     Route::get('/finance/closings', [FinanceController::class, 'closings'])->name('finance.closings');
     Route::post('/finance/closings', [FinanceController::class, 'closing'])->name('finance.closing');
 

@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use App\Enums\AccountType;
+use App\Enums\FinancialTransferStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionType;
 use App\Models\FinancialAccount;
+use App\Models\FinancialTransfer;
 use App\Models\FinancialTransaction;
 use App\Models\PurchasePayment;
 use App\Models\RepairPayment;
@@ -26,6 +28,7 @@ class FinancialAccountService
             'opening_balance' => $data['opening_balance'] ?? 0,
             'current_balance' => $data['opening_balance'] ?? 0,
             'description' => $data['description'] ?? null,
+            'logo_path' => $data['logo_path'] ?? null,
             'is_active' => $data['is_active'] ?? true,
         ]);
     }
@@ -36,6 +39,10 @@ class FinancialAccountService
             && $account->transactions()->exists()
         ) {
             unset($data['current_balance'], $data['opening_balance']);
+        }
+
+        if (array_key_exists('name', $data)) {
+            $data['name'] = trim((string) $data['name']);
         }
 
         $account->update($data);
@@ -203,6 +210,248 @@ class FinancialAccountService
             $lockedAccount->update(['current_balance' => $balanceAfter]);
 
             return $transaction;
+        });
+    }
+
+    public function createTransfer(array $data): FinancialTransfer
+    {
+        $fromAccountId = (int) $data['from_account_id'];
+        $toAccountId = (int) $data['to_account_id'];
+        $amount = round((float) $data['amount'], 2);
+
+        if ($fromAccountId === $toAccountId) {
+            throw new \RuntimeException('لا يمكن التحويل إلى نفس الحساب.');
+        }
+
+        if ($amount <= 0) {
+            throw new \RuntimeException('مبلغ التحويل يجب أن يكون أكبر من صفر.');
+        }
+
+        return DB::transaction(function () use ($fromAccountId, $toAccountId, $amount, $data): FinancialTransfer {
+            $accountIds = [$fromAccountId, $toAccountId];
+            sort($accountIds, SORT_NUMERIC);
+
+            $accounts = FinancialAccount::query()
+                ->whereIn('id', $accountIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            $fromAccount = $accounts->get($fromAccountId);
+            $toAccount = $accounts->get($toAccountId);
+
+            if (!$fromAccount || !$toAccount) {
+                throw new \RuntimeException('أحد الحسابات المالية غير موجود.');
+            }
+
+            if (!$fromAccount->is_active || !$toAccount->is_active) {
+                throw new \RuntimeException('يجب أن يكون الحساب المصدر والحساب المستلم نشطين.');
+            }
+
+            $sourceBalanceBefore = round((float) $fromAccount->current_balance, 2);
+
+            if ($sourceBalanceBefore < $amount) {
+                throw new \RuntimeException(
+                    'الرصيد غير كافٍ في حساب «'
+                    . $fromAccount->name
+                    . '». المتوفر: '
+                    . number_format($sourceBalanceBefore, 2)
+                    . ' شيكل'
+                );
+            }
+
+            $destinationBalanceBefore = round((float) $toAccount->current_balance, 2);
+            $sourceBalanceAfter = round($sourceBalanceBefore - $amount, 2);
+            $destinationBalanceAfter = round($destinationBalanceBefore + $amount, 2);
+
+            $transfer = FinancialTransfer::create([
+                'transfer_number' => FinancialTransfer::generateNumber(),
+                'from_account_id' => $fromAccount->id,
+                'to_account_id' => $toAccount->id,
+                'amount' => $amount,
+                'transfer_date' => $data['transfer_date'],
+                'notes' => $data['notes'] ?? null,
+                'status' => FinancialTransferStatus::POSTED->value,
+            ]);
+
+            FinancialTransaction::create([
+                'financial_account_id' => $fromAccount->id,
+                'type' => TransactionType::ACCOUNT_TRANSFER->value,
+                'direction' => TransactionDirection::OUTFLOW->value,
+                'amount' => $amount,
+                'balance_before' => $sourceBalanceBefore,
+                'balance_after' => $sourceBalanceAfter,
+                'transaction_date' => $data['transfer_date'],
+                'reference_type' => $transfer->getMorphClass(),
+                'reference_id' => $transfer->id,
+                'description' => "تحويل صادر {$transfer->transfer_number} إلى {$toAccount->name}",
+                'notes' => $data['notes'] ?? null,
+            ]);
+
+            FinancialTransaction::create([
+                'financial_account_id' => $toAccount->id,
+                'type' => TransactionType::ACCOUNT_TRANSFER->value,
+                'direction' => TransactionDirection::INFLOW->value,
+                'amount' => $amount,
+                'balance_before' => $destinationBalanceBefore,
+                'balance_after' => $destinationBalanceAfter,
+                'transaction_date' => $data['transfer_date'],
+                'reference_type' => $transfer->getMorphClass(),
+                'reference_id' => $transfer->id,
+                'description' => "تحويل وارد {$transfer->transfer_number} من {$fromAccount->name}",
+                'notes' => $data['notes'] ?? null,
+            ]);
+
+            $fromAccount->update([
+                'current_balance' => $sourceBalanceAfter,
+            ]);
+
+            $toAccount->update([
+                'current_balance' => $destinationBalanceAfter,
+            ]);
+
+            return $transfer->load(['fromAccount', 'toAccount', 'transactions.account']);
+        });
+    }
+
+    public function cancelTransfer(FinancialTransfer $transfer, string $reason): FinancialTransfer
+    {
+        return DB::transaction(function () use ($transfer, $reason): FinancialTransfer {
+            $lockedTransfer = FinancialTransfer::query()
+                ->lockForUpdate()
+                ->findOrFail($transfer->id);
+
+            if ($lockedTransfer->status === FinancialTransferStatus::CANCELLED) {
+                return $lockedTransfer->load(['fromAccount', 'toAccount', 'transactions.account']);
+            }
+
+            $accountIds = [
+                (int) $lockedTransfer->from_account_id,
+                (int) $lockedTransfer->to_account_id,
+            ];
+            sort($accountIds, SORT_NUMERIC);
+
+            $accounts = FinancialAccount::query()
+                ->whereIn('id', $accountIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            $fromAccount = $accounts->get((int) $lockedTransfer->from_account_id);
+            $toAccount = $accounts->get((int) $lockedTransfer->to_account_id);
+
+            if (!$fromAccount || !$toAccount) {
+                throw new \RuntimeException('تعذر العثور على حسابات التحويل الأصلية.');
+            }
+
+            $originalTransactions = FinancialTransaction::query()
+                ->where('reference_type', $lockedTransfer->getMorphClass())
+                ->where('reference_id', $lockedTransfer->id)
+                ->where('type', TransactionType::ACCOUNT_TRANSFER->value)
+                ->lockForUpdate()
+                ->get();
+
+            $sourceTransaction = $originalTransactions->first(
+                fn (FinancialTransaction $transaction): bool =>
+                    (int) $transaction->financial_account_id === (int) $fromAccount->id
+                    && $transaction->direction === TransactionDirection::OUTFLOW
+            );
+
+            $destinationTransaction = $originalTransactions->first(
+                fn (FinancialTransaction $transaction): bool =>
+                    (int) $transaction->financial_account_id === (int) $toAccount->id
+                    && $transaction->direction === TransactionDirection::INFLOW
+            );
+
+            if (!$sourceTransaction || !$destinationTransaction) {
+                throw new \RuntimeException('سجل التحويل المالي غير مكتمل، لذلك لا يمكن عكسه تلقائياً.');
+            }
+
+            $alreadyReversed = FinancialTransaction::query()
+                ->where('type', TransactionType::REVERSAL->value)
+                ->where(function ($query) use ($sourceTransaction, $destinationTransaction): void {
+                    $query
+                        ->where(function ($nested) use ($sourceTransaction): void {
+                            $nested
+                                ->where('reference_type', $sourceTransaction->getMorphClass())
+                                ->where('reference_id', $sourceTransaction->id);
+                        })
+                        ->orWhere(function ($nested) use ($destinationTransaction): void {
+                            $nested
+                                ->where('reference_type', $destinationTransaction->getMorphClass())
+                                ->where('reference_id', $destinationTransaction->id);
+                        });
+                })
+                ->exists();
+
+            if ($alreadyReversed) {
+                throw new \RuntimeException('تم العثور على حركة عكس سابقة مرتبطة بهذا التحويل.');
+            }
+
+            $amount = round((float) $lockedTransfer->amount, 2);
+            $destinationBalanceBefore = round((float) $toAccount->current_balance, 2);
+
+            if ($destinationBalanceBefore < $amount) {
+                throw new \RuntimeException(
+                    'لا يمكن إلغاء التحويل لأن رصيد الحساب المستلم «'
+                    . $toAccount->name
+                    . '» أقل من مبلغ التحويل. المتوفر: '
+                    . number_format($destinationBalanceBefore, 2)
+                    . ' شيكل'
+                );
+            }
+
+            $sourceBalanceBefore = round((float) $fromAccount->current_balance, 2);
+            $sourceBalanceAfter = round($sourceBalanceBefore + $amount, 2);
+            $destinationBalanceAfter = round($destinationBalanceBefore - $amount, 2);
+            $reversalDate = now();
+            $reversalNotes = 'سبب إلغاء التحويل: ' . trim($reason);
+
+            FinancialTransaction::create([
+                'financial_account_id' => $toAccount->id,
+                'type' => TransactionType::REVERSAL->value,
+                'direction' => TransactionDirection::OUTFLOW->value,
+                'amount' => $amount,
+                'balance_before' => $destinationBalanceBefore,
+                'balance_after' => $destinationBalanceAfter,
+                'transaction_date' => $reversalDate,
+                'reference_type' => $destinationTransaction->getMorphClass(),
+                'reference_id' => $destinationTransaction->id,
+                'description' => "عكس تحويل {$lockedTransfer->transfer_number} - خصم من {$toAccount->name}",
+                'notes' => $reversalNotes,
+            ]);
+
+            FinancialTransaction::create([
+                'financial_account_id' => $fromAccount->id,
+                'type' => TransactionType::REVERSAL->value,
+                'direction' => TransactionDirection::INFLOW->value,
+                'amount' => $amount,
+                'balance_before' => $sourceBalanceBefore,
+                'balance_after' => $sourceBalanceAfter,
+                'transaction_date' => $reversalDate,
+                'reference_type' => $sourceTransaction->getMorphClass(),
+                'reference_id' => $sourceTransaction->id,
+                'description' => "عكس تحويل {$lockedTransfer->transfer_number} - إعادة إلى {$fromAccount->name}",
+                'notes' => $reversalNotes,
+            ]);
+
+            $toAccount->update([
+                'current_balance' => $destinationBalanceAfter,
+            ]);
+
+            $fromAccount->update([
+                'current_balance' => $sourceBalanceAfter,
+            ]);
+
+            $lockedTransfer->update([
+                'status' => FinancialTransferStatus::CANCELLED->value,
+                'cancelled_at' => $reversalDate,
+                'cancellation_reason' => trim($reason),
+            ]);
+
+            return $lockedTransfer->fresh()->load(['fromAccount', 'toAccount', 'transactions.account']);
         });
     }
 

@@ -3,11 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Enums\AccountType;
+use App\Enums\FinancialTransferStatus;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionType;
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
 use App\Models\FinancialAccount;
+use App\Models\FinancialTransfer;
 use App\Models\FinancialTransaction;
 use App\Models\DailyAccountClosing;
 use App\Services\FinancialAccountService;
@@ -33,6 +35,7 @@ class FinanceController extends Controller
     public function index()
     {
         $accounts = FinancialAccount::query()
+            ->withExists(['transactions', 'closings'])
             ->orderByDesc('is_active')
             ->orderBy('type')
             ->orderBy('name')
@@ -42,6 +45,11 @@ class FinanceController extends Controller
             $account->setAttribute('type_label', $account->type_label);
             $account->setAttribute('today_inflows', $account->today_inflows);
             $account->setAttribute('today_outflows', $account->today_outflows);
+            $account->setAttribute(
+                'has_transactions',
+                (bool) $account->transactions_exists || (bool) $account->closings_exists
+            );
+            $account->makeHidden(['transactions_exists', 'closings_exists']);
         });
 
         $activeAccounts =
@@ -57,6 +65,10 @@ class FinanceController extends Controller
                     today()->startOfDay(),
                     today()->endOfDay()
                 );
+
+        $todayTransfers = FinancialTransfer::query()
+            ->where('status', FinancialTransferStatus::POSTED->value)
+            ->whereDate('transfer_date', today());
 
         /*
          * تعطيل الحساب يمنع استخدامه في عمليات جديدة فقط.
@@ -122,6 +134,12 @@ class FinanceController extends Controller
                     'net_cash_flow'
                 ],
 
+            'today_transfer_volume' =>
+                (float) (clone $todayTransfers)->sum('amount'),
+
+            'today_transfer_count' =>
+                (clone $todayTransfers)->count(),
+
             'active_accounts' =>
                 $activeAccounts->count(),
 
@@ -142,28 +160,128 @@ class FinanceController extends Controller
     }
 
     /**
-     * إضافة حساب مالي
+     * إضافة حساب مالي.
+     *
+     * الشعار اختياري ويُحفظ على public disk حتى يمكن استخدامه
+     * في بطاقات الحسابات وباقي الواجهات المالية.
      */
     public function storeAccount(Request $request)
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'type' => ['required', 'string', 'in:cash,bank,banking_app'],
-            'opening_balance' => ['nullable', 'numeric', 'min:0'],
+            'opening_balance' => ['nullable', 'numeric', 'min:0', 'max:9999999999.99'],
             'description' => ['nullable', 'string', 'max:500'],
-            'is_active' => ['boolean'],
+            'is_active' => ['nullable', 'boolean'],
+            'logo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
         ]);
 
-        $validated['opening_balance'] = (float) ($validated['opening_balance'] ?? 0);
-        $validated['is_active'] = $request->has('is_active')
-            ? $request->boolean('is_active')
-            : true;
+        $logoPath = null;
 
-        $this->financeService->createAccount($validated);
+        try {
+            if ($request->hasFile('logo')) {
+                $logoPath = $request->file('logo')->store('financial-accounts/logos', 'public');
+            }
+
+            $validated['opening_balance'] = (float) ($validated['opening_balance'] ?? 0);
+            $validated['is_active'] = $request->has('is_active')
+                ? $request->boolean('is_active')
+                : true;
+            $validated['logo_path'] = $logoPath;
+
+            unset($validated['logo']);
+
+            $this->financeService->createAccount($validated);
+        } catch (\Throwable $exception) {
+            if ($logoPath) {
+                Storage::disk('public')->delete($logoPath);
+            }
+
+            report($exception);
+
+            return redirect()
+                ->back()
+                ->withInput()
+                ->with('error', $exception->getMessage());
+        }
 
         return redirect()
             ->route('finance.index')
             ->with('success', 'تم إضافة الحساب بنجاح.');
+    }
+
+    /**
+     * تعديل بيانات الحساب المالي وشعاره.
+     *
+     * بعد وجود حركات على الحساب لا نسمح بتغيير نوع الحساب أو
+     * الرصيد الافتتاحي حتى لا يتغير المعنى التاريخي للحركات السابقة.
+     */
+    public function updateAccount(Request $request, FinancialAccount $financialAccount)
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'type' => ['required', 'string', 'in:cash,bank,banking_app'],
+            'opening_balance' => ['nullable', 'numeric', 'min:0', 'max:9999999999.99'],
+            'description' => ['nullable', 'string', 'max:500'],
+            'is_active' => ['nullable', 'boolean'],
+            'logo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'remove_logo' => ['nullable', 'boolean'],
+        ]);
+
+        $hasTransactions = $financialAccount->transactions()->exists()
+            || $financialAccount->closings()->exists();
+        $newLogoPath = null;
+        $oldLogoPath = $financialAccount->logo_path;
+        $removeLogo = $request->boolean('remove_logo');
+
+        try {
+            if ($request->hasFile('logo')) {
+                $newLogoPath = $request->file('logo')->store('financial-accounts/logos', 'public');
+            }
+
+            $data = [
+                'name' => trim($validated['name']),
+                'description' => $validated['description'] ?? null,
+                'is_active' => $request->has('is_active')
+                    ? $request->boolean('is_active')
+                    : $financialAccount->is_active,
+            ];
+
+            if (! $hasTransactions) {
+                $openingBalance = (float) ($validated['opening_balance'] ?? 0);
+
+                $data['type'] = $validated['type'];
+                $data['opening_balance'] = $openingBalance;
+                $data['current_balance'] = $openingBalance;
+            }
+
+            if ($newLogoPath) {
+                $data['logo_path'] = $newLogoPath;
+            } elseif ($removeLogo) {
+                $data['logo_path'] = null;
+            }
+
+            $this->financeService->updateAccount($financialAccount, $data);
+
+            if (($newLogoPath || $removeLogo) && $oldLogoPath) {
+                Storage::disk('public')->delete($oldLogoPath);
+            }
+        } catch (\Throwable $exception) {
+            if ($newLogoPath) {
+                Storage::disk('public')->delete($newLogoPath);
+            }
+
+            report($exception);
+
+            return redirect()
+                ->back()
+                ->withInput()
+                ->with('error', $exception->getMessage());
+        }
+
+        return redirect()
+            ->route('finance.index')
+            ->with('success', 'تم تحديث الحساب بنجاح.');
     }
 
     public function toggleAccountStatus(
@@ -355,8 +473,38 @@ class FinanceController extends Controller
 
 
     /**
-     * قائمة المصروفات
+     * صفحة تسجيل مصروف جديد.
      */
+    public function createExpense()
+    {
+        $categories = ExpenseCategory::query()
+            ->active()
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        $accounts = FinancialAccount::query()
+            ->active()
+            ->orderBy('type')
+            ->orderBy('name')
+            ->get([
+                'id',
+                'name',
+                'type',
+                'current_balance',
+                'logo_path',
+            ]);
+
+        $accounts->each(function (FinancialAccount $account): void {
+            $account->setAttribute('type_label', $account->type_label);
+        });
+
+        return Inertia::render('Finance/ExpenseCreate', [
+            'categories' => $categories,
+            'accounts' => $accounts,
+            'today' => now()->toDateString(),
+        ]);
+    }
+
     public function expenses(Request $request)
     {
         $query = Expense::with(['category', 'account'])
@@ -531,6 +679,172 @@ class FinanceController extends Controller
         }
 
         return redirect()->route('finance.expenses')->with('success', 'تم إلغاء المصروف بنجاح');
+    }
+
+    /**
+     * التحويلات بين الحسابات المالية.
+     */
+    public function transfers(Request $request)
+    {
+        $query = FinancialTransfer::query()
+            ->with(['fromAccount', 'toAccount'])
+            ->when($request->filled('search'), function ($query) use ($request): void {
+                $search = trim((string) $request->search);
+
+                $query->where(function ($nestedQuery) use ($search): void {
+                    $nestedQuery
+                        ->where('transfer_number', 'like', "%{$search}%")
+                        ->orWhere('notes', 'like', "%{$search}%")
+                        ->orWhereHas('fromAccount', fn ($accountQuery) => $accountQuery->where('name', 'like', "%{$search}%"))
+                        ->orWhereHas('toAccount', fn ($accountQuery) => $accountQuery->where('name', 'like', "%{$search}%"));
+                });
+            })
+            ->when($request->filled('account_id'), function ($query) use ($request): void {
+                $accountId = (int) $request->account_id;
+
+                $query->where(function ($nestedQuery) use ($accountId): void {
+                    $nestedQuery
+                        ->where('from_account_id', $accountId)
+                        ->orWhere('to_account_id', $accountId);
+                });
+            })
+            ->when($request->filled('status'), function ($query) use ($request): void {
+                $query->where('status', $request->status);
+            })
+            ->when($request->filled('start_date'), function ($query) use ($request): void {
+                $query->whereDate('transfer_date', '>=', $request->start_date);
+            })
+            ->when($request->filled('end_date'), function ($query) use ($request): void {
+                $query->whereDate('transfer_date', '<=', $request->end_date);
+            });
+
+        $transfers = (clone $query)
+            ->orderByDesc('transfer_date')
+            ->orderByDesc('id')
+            ->paginate(15)
+            ->withQueryString();
+
+        $transfers->getCollection()->each(function (FinancialTransfer $transfer): void {
+            $transfer->setAttribute('status_label', $transfer->status_label);
+            $transfer->setAttribute('can_be_cancelled', $transfer->can_be_cancelled);
+
+            if ($transfer->fromAccount) {
+                $transfer->fromAccount->setAttribute('type_label', $transfer->fromAccount->type_label);
+            }
+
+            if ($transfer->toAccount) {
+                $transfer->toAccount->setAttribute('type_label', $transfer->toAccount->type_label);
+            }
+        });
+
+        $accounts = FinancialAccount::query()
+            ->orderByDesc('is_active')
+            ->orderBy('type')
+            ->orderBy('name')
+            ->get();
+
+        $accounts->each(function (FinancialAccount $account): void {
+            $account->setAttribute('type_label', $account->type_label);
+        });
+
+        $activeAccounts = $accounts
+            ->where('is_active', true)
+            ->values();
+
+        $statsQuery = FinancialTransfer::query()
+            ->when($request->filled('start_date'), function ($query) use ($request): void {
+                $query->whereDate('transfer_date', '>=', $request->start_date);
+            })
+            ->when($request->filled('end_date'), function ($query) use ($request): void {
+                $query->whereDate('transfer_date', '<=', $request->end_date);
+            });
+
+        $postedStatsQuery = (clone $statsQuery)
+            ->where('status', FinancialTransferStatus::POSTED->value);
+
+        return Inertia::render('Finance/Transfers', [
+            'transfers' => $transfers,
+            'accounts' => $accounts,
+            'activeAccounts' => $activeAccounts,
+            'stats' => [
+                'total_volume' => round((float) (clone $postedStatsQuery)->sum('amount'), 2),
+                'transfer_count' => (clone $postedStatsQuery)->count(),
+                'today_volume' => round((float) FinancialTransfer::query()
+                    ->where('status', FinancialTransferStatus::POSTED->value)
+                    ->whereDate('transfer_date', today())
+                    ->sum('amount'), 2),
+                'cancelled_count' => (clone $statsQuery)
+                    ->where('status', FinancialTransferStatus::CANCELLED->value)
+                    ->count(),
+            ],
+            'filters' => [
+                'search' => $request->search,
+                'account_id' => $request->account_id,
+                'status' => $request->status,
+                'start_date' => $request->start_date,
+                'end_date' => $request->end_date,
+            ],
+            'statuses' => FinancialTransferStatus::labels(),
+        ]);
+    }
+
+    /**
+     * تسجيل تحويل جديد بين حسابين ماليين.
+     */
+    public function storeTransfer(Request $request)
+    {
+        $validated = $request->validate([
+            'from_account_id' => ['required', 'integer', 'exists:financial_accounts,id,is_active,1'],
+            'to_account_id' => ['required', 'integer', 'different:from_account_id', 'exists:financial_accounts,id,is_active,1'],
+            'amount' => ['required', 'numeric', 'min:0.01', 'max:9999999999.99'],
+            'transfer_date' => ['required', 'date', 'before_or_equal:today'],
+            'notes' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        try {
+            $transfer = $this->financeService->createTransfer($validated);
+
+            return redirect()
+                ->route('finance.transfers')
+                ->with(
+                    'success',
+                    "تم تنفيذ التحويل {$transfer->transfer_number} بنجاح."
+                );
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return redirect()
+                ->back()
+                ->withInput()
+                ->with('error', $exception->getMessage());
+        }
+    }
+
+    /**
+     * إلغاء تحويل سابق بإنشاء حركتي عكس، دون حذف السجل الأصلي.
+     */
+    public function cancelTransfer(Request $request, FinancialTransfer $financialTransfer)
+    {
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'max:500'],
+        ]);
+
+        try {
+            $this->financeService->cancelTransfer(
+                $financialTransfer,
+                $validated['reason']
+            );
+
+            return redirect()
+                ->back()
+                ->with('success', 'تم إلغاء التحويل وعكس الحركات المالية بنجاح.');
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return redirect()
+                ->back()
+                ->with('error', $exception->getMessage());
+        }
     }
 
     /**

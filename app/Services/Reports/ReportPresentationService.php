@@ -148,6 +148,9 @@ class ReportPresentationService
                 'exchange_net' => 'صافي فروقات الاستبدال',
                 'other_net_flow' => 'صافي الحركات الأخرى',
                 'reversal_count' => 'عدد حركات العكس',
+                'transfer_volume' => 'حجم التحويلات الداخلية',
+                'transfer_count' => 'عدد التحويلات المكتملة',
+                'cancelled_transfer_count' => 'عدد التحويلات الملغاة',
                 'customer_debts' => 'مستحقات العملاء',
                 'supplier_debts' => 'مستحقات الموردين',
                 'total_difference' => 'فروقات الإغلاق',
@@ -213,6 +216,15 @@ class ReportPresentationService
                     'name' => 'الحساب', 'type_label' => 'النوع', 'current_balance' => 'الرصيد',
                 ]],
                 ['key' => 'aging', 'title' => 'أعمار الديون', 'columns' => ['label' => 'الفترة', 'value' => 'القيمة']],
+                ['key' => 'transfers', 'title' => 'التحويلات بين الحسابات', 'columns' => [
+                    'transfer_number' => 'رقم التحويل', 'fromAccount.name' => 'من حساب', 'toAccount.name' => 'إلى حساب',
+                    'amount' => 'المبلغ', 'transfer_date' => 'التاريخ', 'status' => 'الحالة',
+                ]],
+                ['key' => 'transactions', 'title' => 'الحركات المالية التفصيلية', 'columns' => [
+                    'transaction_date' => 'التاريخ', 'account.name' => 'الحساب', 'type' => 'نوع الحركة',
+                    'direction' => 'الاتجاه', 'description' => 'الوصف', 'amount' => 'المبلغ',
+                    'balance_before' => 'الرصيد قبل', 'balance_after' => 'الرصيد بعد',
+                ]],
                 ['key' => 'closings', 'title' => 'آخر الإغلاقات اليومية', 'columns' => [
                     'closing_date' => 'التاريخ', 'account.name' => 'الحساب', 'expected_balance' => 'المتوقع',
                     'actual_balance' => 'الفعلي', 'difference' => 'الفرق',

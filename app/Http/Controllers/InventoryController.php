@@ -52,6 +52,15 @@ class InventoryController extends Controller
                 ),
             ],
 
+            'warehouse_type' => [
+                'nullable',
+                'string',
+                Rule::in([
+                    'sales',
+                    'maintenance',
+                ]),
+            ],
+
             'stock_status' => [
                 'nullable',
                 'string',
@@ -73,6 +82,13 @@ class InventoryController extends Controller
                 ? (int) $filters[
                     'warehouse_id'
                 ]
+                : null;
+
+        $warehouseType =
+            ! empty(
+                $filters['warehouse_type']
+            )
+                ? (string) $filters['warehouse_type']
                 : null;
 
         $stockStatus = match (
@@ -119,6 +135,30 @@ class InventoryController extends Controller
                         'quantity'
                     )
             )
+            ->when(
+                ! $warehouseId && $warehouseType,
+                fn (Builder $query) =>
+                    $query->withSum(
+                        [
+                            'stocks as filtered_type_stock' =>
+                                fn (Builder $stockQuery) =>
+                                    $stockQuery->whereHas(
+                                        'warehouse',
+                                        fn (Builder $warehouseQuery) =>
+                                            $warehouseQuery
+                                                ->where(
+                                                    'type',
+                                                    $warehouseType
+                                                )
+                                                ->where(
+                                                    'is_active',
+                                                    true
+                                                )
+                                    ),
+                        ],
+                        'quantity'
+                    )
+            )
             ->search(
                 $filters['search']
                 ?? null
@@ -129,11 +169,65 @@ class InventoryController extends Controller
             );
 
         /*
-         * إذا اختار المستخدم مخزناً:
-         * حالة "متوفر / منخفض / نافد" تُحسب بالنسبة لذلك المخزن.
+         * فصل العرض حسب المخزن أو نوع المخزن.
          *
-         * لا نستخدم whereHas(quantity > 0) لأن ذلك كان يمنع
-         * ظهور المنتجات النافدة داخل المخزن المحدد.
+         * عند اختيار "المبيعات" أو "الصيانة" بدون حالة "نافد"،
+         * نعرض فقط المنتجات الموجودة فعلياً برصيد أكبر من صفر داخل النطاق.
+         * هذا يمنع ظهور نفس قائمة المنتجات في كلا الخيارين.
+         *
+         * عند اختيار حالة "نافد" لا نفرض quantity > 0 حتى يمكن فعلاً
+         * البحث عن المنتجات ذات الرصيد الصفري داخل المخزن المحدد.
+         */
+        if ($warehouseId && $stockStatus !== 'out') {
+            $query->whereHas(
+                'stocks',
+                fn (Builder $stockQuery) =>
+                    $stockQuery
+                        ->where(
+                            'warehouse_id',
+                            $warehouseId
+                        )
+                        ->where(
+                            'quantity',
+                            '>',
+                            0
+                        )
+            );
+        } elseif (
+            ! $warehouseId
+            && $warehouseType
+            && $stockStatus !== 'out'
+        ) {
+            $query->whereHas(
+                'stocks',
+                fn (Builder $stockQuery) =>
+                    $stockQuery
+                        ->where(
+                            'quantity',
+                            '>',
+                            0
+                        )
+                        ->whereHas(
+                            'warehouse',
+                            fn (Builder $warehouseQuery) =>
+                                $warehouseQuery
+                                    ->where(
+                                        'type',
+                                        $warehouseType
+                                    )
+                                    ->where(
+                                        'is_active',
+                                        true
+                                    )
+                        )
+            );
+        }
+
+        /*
+         * حالة "متوفر / منخفض / نافد" تُحسب بالنسبة إلى نطاق العرض:
+         * 1) المخزن المحدد، إن وجد.
+         * 2) نوع المخزن (مبيعات/صيانة)، إن تم اختياره.
+         * 3) إجمالي جميع المخازن في عرض "الكل".
          */
         if ($stockStatus) {
             if ($warehouseId) {
@@ -147,6 +241,21 @@ class InventoryController extends Controller
 
                 $bindings = [
                     $warehouseId,
+                ];
+            } elseif ($warehouseType) {
+                $stockExpression =
+                    'COALESCE((
+                        SELECT SUM(ps.quantity)
+                        FROM product_stocks ps
+                        INNER JOIN warehouses w
+                            ON w.id = ps.warehouse_id
+                        WHERE ps.product_id = products.id
+                          AND w.type = ?
+                          AND w.is_active = 1
+                    ), 0)';
+
+                $bindings = [
+                    $warehouseType,
                 ];
             } else {
                 $stockExpression =
@@ -207,7 +316,8 @@ class InventoryController extends Controller
                 function (
                     Product $product
                 ) use (
-                    $warehouseId
+                    $warehouseId,
+                    $warehouseType
                 ): Product {
                     /*
                      * لا نستخدم first() لأن النظام قد يحتوي
@@ -267,10 +377,18 @@ class InventoryController extends Controller
                                 )
                             : null;
 
+                    $typeStock = match ($warehouseType) {
+                        'sales' => $salesStock,
+                        'maintenance' => $maintenanceStock,
+                        default => null,
+                    };
+
                     $displayStock =
                         $warehouseId
                             ? $warehouseStock
-                            : $totalStock;
+                            : ($warehouseType
+                                ? $typeStock
+                                : $totalStock);
 
                     $threshold =
                         (int) (
@@ -306,6 +424,16 @@ class InventoryController extends Controller
                     );
 
                     $product->setAttribute(
+                        'filtered_type_stock',
+                        $typeStock
+                    );
+
+                    $product->setAttribute(
+                        'display_stock',
+                        $displayStock
+                    );
+
+                    $product->setAttribute(
                         'display_stock_status',
                         $displayStatus
                     );
@@ -315,7 +443,7 @@ class InventoryController extends Controller
                         round(
                             (float) $product
                                 ->purchase_price
-                            * $totalStock,
+                            * $displayStock,
                             2
                         )
                     );
@@ -338,6 +466,10 @@ class InventoryController extends Controller
         $maintenanceValue = 0.0;
         $totalValue = 0.0;
         $totalPieces = 0;
+        $salesPieces = 0;
+        $maintenancePieces = 0;
+        $salesSkuCount = 0;
+        $maintenanceSkuCount = 0;
         $lowStockCount = 0;
         $outOfStockCount = 0;
         $productsWithStock = 0;
@@ -402,6 +534,20 @@ class InventoryController extends Controller
             $totalPieces +=
                 $totalQty;
 
+            $salesPieces +=
+                $salesQty;
+
+            $maintenancePieces +=
+                $maintenanceQty;
+
+            if ($salesQty > 0) {
+                $salesSkuCount++;
+            }
+
+            if ($maintenanceQty > 0) {
+                $maintenanceSkuCount++;
+            }
+
             if ($totalQty > 0) {
                 $productsWithStock++;
             }
@@ -422,6 +568,33 @@ class InventoryController extends Controller
                 $lowStockCount++;
             }
         }
+
+        $warehouseTypeSummary = [
+            'all' => [
+                'key' => 'all',
+                'label' => 'كل المخزون',
+                'description' => 'المبيعات والصيانة معاً',
+                'pieces' => $totalPieces,
+                'value' => round($totalValue, 2),
+                'sku_count' => $productsWithStock,
+            ],
+            'sales' => [
+                'key' => 'sales',
+                'label' => 'مخزون المبيعات',
+                'description' => 'الأصناف المتاحة للبيع فعلياً',
+                'pieces' => $salesPieces,
+                'value' => round($salesValue, 2),
+                'sku_count' => $salesSkuCount,
+            ],
+            'maintenance' => [
+                'key' => 'maintenance',
+                'label' => 'مخزون الصيانة',
+                'description' => 'القطع والأصناف المخصصة للصيانة',
+                'pieces' => $maintenancePieces,
+                'value' => round($maintenanceValue, 2),
+                'sku_count' => $maintenanceSkuCount,
+            ],
+        ];
 
         $activeWarehouses =
             Warehouse::query()
@@ -668,6 +841,10 @@ class InventoryController extends Controller
                         $warehouseId
                         ?? '',
 
+                    'warehouse_type' =>
+                        $warehouseType
+                        ?? '',
+
                     'stock_status' =>
                         $stockStatus
                         ?? '',
@@ -681,6 +858,9 @@ class InventoryController extends Controller
 
                 'warehouseSummary' =>
                     $warehouseSummary,
+
+                'warehouseTypeSummary' =>
+                    $warehouseTypeSummary,
 
                 'recentMovements' =>
                     $recentMovements,

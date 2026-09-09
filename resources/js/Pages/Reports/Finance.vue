@@ -14,6 +14,7 @@ const asArray = (value) => Array.isArray(value)
 
 const accounts = computed(() => asArray(props.data?.accounts));
 const transactions = computed(() => asArray(props.data?.transactions));
+const transfers = computed(() => asArray(props.data?.transfers));
 const closings = computed(() => asArray(props.data?.closings));
 
 const periods = [
@@ -67,12 +68,22 @@ const directionLabel = (value) => ({
 const transactionTypeLabel = (value) => ({
     sale_payment: 'دفعة مبيعات',
     repair_payment: 'دفعة صيانة',
+    repair_part_purchase: 'شراء قطعة صيانة خارجية',
     purchase_payment: 'دفعة مشتريات',
+    sales_refund: 'استرداد مرتجع مبيعات',
+    purchase_refund: 'استرداد مرتجع مشتريات',
+    exchange_difference: 'تسوية فرق استبدال',
     expense: 'مصروف',
     manual_deposit: 'إيداع يدوي',
     manual_withdrawal: 'سحب يدوي',
     balance_adjustment: 'تسوية رصيد',
+    account_transfer: 'تحويل بين الحسابات',
     reversal: 'عكس حركة',
+}[enumValue(value)] || enumValue(value) || '—');
+
+const transferStatusLabel = (value) => ({
+    posted: 'مكتمل',
+    cancelled: 'ملغي',
 }[enumValue(value)] || enumValue(value) || '—');
 
 const agingLabels = {
@@ -159,6 +170,8 @@ const printReport = () => window.open(
                     ['مدفوع للموردين', money(data.summary?.paid_to_suppliers)],
                     ['المصروفات', money(data.summary?.expenses)],
                     ['صافي التدفق', money(data.summary?.net_cash_flow)],
+                    ['حجم التحويلات الداخلية', money(data.summary?.transfer_volume)],
+                    ['عدد التحويلات', Number(data.summary?.transfer_count || 0).toLocaleString('ar-PS')],
                     ['مستحقات العملاء', money(data.summary?.customer_debts)],
                     ['مستحقات الموردين', money(data.summary?.supplier_debts)],
                 ]" :key="item[0]" class="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
@@ -193,6 +206,38 @@ const printReport = () => window.open(
                         </div>
                     </div>
                 </article>
+            </section>
+
+            <section v-if="transfers.length" class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                <div class="border-b border-slate-200 px-5 py-4 dark:border-slate-700">
+                    <h2 class="font-black dark:text-white">التحويلات بين الحسابات</h2>
+                    <p class="mt-1 text-xs text-slate-500">{{ transfers.length }} تحويل ضمن الفترة. لا تدخل قيمتها ضمن إجمالي الوارد والصادر العام.</p>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="min-w-[900px] w-full text-sm">
+                        <thead class="bg-slate-100 dark:bg-slate-700">
+                            <tr>
+                                <th class="px-4 py-3 text-right">رقم التحويل</th>
+                                <th class="px-4 py-3 text-right">من حساب</th>
+                                <th class="px-4 py-3 text-right">إلى حساب</th>
+                                <th class="px-4 py-3 text-right">المبلغ</th>
+                                <th class="px-4 py-3 text-right">التاريخ</th>
+                                <th class="px-4 py-3 text-right">الحالة</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                            <tr v-for="transfer in transfers" :key="transfer.id">
+                                <td class="px-4 py-3 font-black">{{ transfer.transfer_number }}</td>
+                                <td class="px-4 py-3">{{ transfer.from_account?.name || '—' }}</td>
+                                <td class="px-4 py-3">{{ transfer.to_account?.name || '—' }}</td>
+                                <td class="px-4 py-3 font-black">{{ money(transfer.amount) }}</td>
+                                <td class="px-4 py-3">{{ dateTime(transfer.transfer_date) }}</td>
+                                <td class="px-4 py-3">{{ transferStatusLabel(transfer.status) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </section>
 
             <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
